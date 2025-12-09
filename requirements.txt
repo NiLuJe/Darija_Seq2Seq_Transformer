@@ -1,4 +1,7 @@
 awscli
+datasets
+keras
+keras_hub
 loguru
 pip
 python-dotenv

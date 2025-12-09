@@ -57,3 +57,4 @@ EN-ARY NMT school project
 
 --------
 
+Tested w/ Python 3.12

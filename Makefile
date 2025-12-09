@@ -3,7 +3,7 @@
 #################################################################################
 
 PROJECT_NAME = ary_seq2seq
-PYTHON_VERSION = 3
+PYTHON_VERSION = 3.12
 PYTHON_INTERPRETER = python$(PYTHON_VERSION)
 PROJECT_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
