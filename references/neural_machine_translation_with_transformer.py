@@ -417,7 +417,9 @@ x = TransformerDecoder(embed_dim, latent_dim, num_heads)([x, encoder_outputs])
 x = layers.Dropout(0.5)(x)
 decoder_outputs = layers.Dense(vocab_size, activation="softmax")(x)
 # NOTE: This doesn't compile on current Keras (I/O mismatch w/ encoded_seq_inputs)
-#       AFAICT, this is supposed to model the cross-attention (c.f., the KerasHub variant).
+#       AFAICT, this is supposed to model the cross-attention, c.f., the KerasHub variant,
+#       where the encoder_sequence parm is used in the TransformerDecoder:
+#       -> It's for the cross-attention in an encoder-decoder model (v.s., decoder only).
 #       Fortunately, this example doesn't actually use the encoder/decoder blocks on their own,
 #       so we can comment this out.
 #       Unfortunately, we *do* want to be able to do that ourselves, sooooo ;o).
