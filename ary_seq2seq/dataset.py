@@ -5,7 +5,6 @@ from pathlib import Path
 from datasets import load_dataset
 
 from loguru import logger
-from tqdm import tqdm
 import typer
 
 from ary_seq2seq.config import ATLASET_DATASET

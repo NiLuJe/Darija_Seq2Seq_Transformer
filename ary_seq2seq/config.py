@@ -11,6 +11,10 @@ load_dotenv()
 # Ignore tqdm.rich warnings
 warnings.filterwarnings("ignore", category=TqdmExperimentalWarning)
 
+# Always enable color in loguru
+logger = logger.opt(colors=True)
+logger.opt = partial(logger.opt, colors=True)
+
 # Paths
 PROJ_ROOT = Path(__file__).resolve().parents[1]
 logger.info(f"PROJ_ROOT path is: {PROJ_ROOT}")
