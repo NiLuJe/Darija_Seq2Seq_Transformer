@@ -131,9 +131,11 @@ def split_dataset(pairs: SentPairList) -> tuple[SentPairList, SentPairList, Sent
 		f"<green>{len(train_pairs)}</green> train / <green>{len(val_pairs)}</green> val / <green>{len(test_pairs)}</green> test"
 	)
 
+	return train_pairs, val_pairs, test_pairs
+
 
 # Text standardization (pure Python)
-def standardize(text):
+def standardize(text: str) -> str:
 	return text.lower()
 
 
@@ -277,7 +279,9 @@ def train_model(transformer: keras.Model, train_ds: TranslationDataset, val_ds: 
 
 
 # Inference
-def decode_sequence(transformer: keras.Model, ary_lookup: StringLookup, ary_index_lookup: dict[int, str], sentence: str):
+def decode_sequence(
+	transformer: keras.Model, ary_lookup: StringLookup, ary_index_lookup: dict[int, str], sentence: str
+) -> str:
 	enc = pad_sequences(vectorize_eng([sentence]), MAX_SEQUENCE_LENGTH)
 
 	decoded_ids = [int(ary_lookup("[start]"))]
@@ -302,7 +306,7 @@ def decode_sequence(transformer: keras.Model, ary_lookup: StringLookup, ary_inde
 	return " ".join(ary_index_lookup[i] for i in decoded_ids)
 
 
-def save_experiment(transformer: keras.Model, eng_lookup: StringLookup, ary_lookup: StringLookup, timestamp: str):
+def save_experiment(transformer: keras.Model, eng_lookup: StringLookup, ary_lookup: StringLookup, timestamp: str) -> None:
 	logger.info("Saving model...")
 
 	exp_dir = REPORTS_DIR / f"{EXP_NAME}_{timestamp}"
@@ -339,7 +343,7 @@ def eval_on_test(transformer: keras.Model, test_pairs: SentPairList) -> tuple[fl
 # Qualitative inference examples
 def sample_inference(
 	transformer: keras.Model, ary_lookup: StringLookup, ary_index_lookup: dict[int, str], test_pairs: SentPairList
-):
+) -> None:
 	NUM_EXAMPLES = 20
 	examples = []
 
