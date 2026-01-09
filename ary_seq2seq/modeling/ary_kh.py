@@ -44,8 +44,8 @@ app = typer.Typer()
 EXP_NAME = "darija_en_transformer_baseline"
 
 # parms/hparms
-BATCH_SIZE = 64
-EPOCHS = 25
+BATCH_SIZE = 128
+EPOCHS = 10
 MAX_SEQUENCE_LENGTH = 50
 ENG_VOCAB_SIZE = 15000
 ARY_VOCAB_SIZE = 15000
@@ -190,10 +190,11 @@ def pad_sequences(seqs, max_len) -> list[np.array]:
 
 
 class TranslationDataset(keras.utils.PyDataset):
-	def __init__(self, pairs, eng_lookup=None, ary_lookup=None):
+	def __init__(self, eng_lookup, ary_lookup, pairs, **kwargs):
 		self.eng, self.darija = zip(*pairs)
 		self.eng_lookup = eng_lookup
 		self.ary_lookup = ary_lookup
+		super().__init__(**kwargs)
 
 	def __len__(self):
 		return math.ceil(len(self.eng) / BATCH_SIZE)
@@ -329,9 +330,11 @@ def save_experiment(transformer: keras.Model, eng_lookup: StringLookup, ary_look
 
 
 # Evaluate on test set
-def eval_on_test(transformer: keras.Model, test_pairs: SentPairList) -> tuple[float, float]:
+def eval_on_test(
+	transformer: keras.Model, eng_lookup: StringLookup, ary_lookup: StringLookup, test_pairs: SentPairList
+) -> tuple[float, float]:
 	logger.info("Evaluating model on the test set...")
-	test_ds = TranslationDataset(test_pairs)
+	test_ds = TranslationDataset(eng_lookup, ary_lookup, test_pairs)
 
 	test_loss, test_acc = transformer.evaluate(test_ds, verbose=0)
 
@@ -370,8 +373,8 @@ def main():
 
 	eng_lookup, ary_lookup = build_vocab(train_pairs)
 
-	train_ds = TranslationDataset(train_pairs, eng_lookup=eng_lookup, ary_lookup=ary_lookup)
-	val_ds = TranslationDataset(val_pairs, eng_lookup=eng_lookup, ary_lookup=ary_lookup)
+	train_ds = TranslationDataset(eng_lookup, ary_lookup, train_pairs)
+	val_ds = TranslationDataset(eng_lookup, ary_lookup, val_pairs)
 
 	logger.info("Sanity-check the first train sample:")
 	x, y = train_ds[0]
@@ -388,7 +391,7 @@ def main():
 	timestamp = time.strftime("%Y%m%d_%H%M%S")
 	save_experiment(transformer, eng_lookup, ary_lookup, timestamp)
 
-	test_loss, test_acc = eval_on_test(transformer, test_pairs)
+	test_loss, test_acc = eval_on_test(transformer, eng_lookup, ary_lookup, test_pairs)
 
 	# Inference
 	logger.info("Running an inference test on the trained model")
