@@ -1,31 +1,35 @@
 #!/usr/bin/env python3
 
 import os
-# NOTE: Switch to the torch backend, it appears to be slightly faster on AMD.
-os.environ["KERAS_BACKEND"] = "torch"
-
-from functools import partial
-import math
-import json
-import time
-from pathlib import Path
 import random
-from typing import TypeAlias
-random.seed(42)
 
-from loguru import logger
-from datasets import load_from_disk, Dataset
-import keras_hub
+# NOTE: Switch to the torch backend, it appears to be slightly faster on AMD.
+os.environ["KERAS_BACKEND"] = "torch"  # noqa: E402
+random.seed(42)  # noqa: E402
+
+import ast
+from functools import partial
+import html
+import json
+import math
+import re
+import time
+import unicodedata
+
+from datasets import Dataset, load_from_disk
 import keras
-from keras.layers import StringLookup
 from keras import ops
+from keras.layers import StringLookup
+import keras_hub
+from loguru import logger
 import numpy as np
 import torch
 import typer
+
+from ary_seq2seq.config import ATLASET_DATASET, MODELS_DIR, REPORTS_DIR
+
 # Raise errors ASAP
 torch.autograd.set_detect_anomaly(True)
-
-from ary_seq2seq.config import ATLASET_DATASET, REPORTS_DIR, MODELS_DIR
 
 type SentPair = tuple[str, str]
 type SentPairList = list[SentPair]
@@ -42,7 +46,7 @@ EXP_NAME = "darija_en_transformer_baseline"
 # parms/hparms
 BATCH_SIZE = 64
 EPOCHS = 25
-MAX_SEQUENCE_LENGTH = 40
+MAX_SEQUENCE_LENGTH = 50
 ENG_VOCAB_SIZE = 15000
 ARY_VOCAB_SIZE = 15000
 
@@ -55,9 +59,7 @@ NUM_HEADS = 8
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 URL_RE = re.compile(r"https?://\S+|www\.\S+")
 REF_RE = re.compile(r"\[\d+\]")
-BIDI_RE = re.compile(
-	r"[\u200e\u200f\u202a-\u202e\u2066-\u2069\u061c]"
-)
+BIDI_RE = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069\u061c]")
 
 
 def clean_text(text):
@@ -69,10 +71,7 @@ def clean_text(text):
 	text = URL_RE.sub(" ", text)
 	text = REF_RE.sub("", text)
 	text = BIDI_RE.sub("", text)
-	text = "".join(
-		ch for ch in text
-		if not unicodedata.category(ch).startswith("So")
-	)
+	text = "".join(ch for ch in text if not unicodedata.category(ch).startswith("So"))
 	text = re.sub(r"\s+", " ", text)
 	return text.strip()
 
@@ -84,7 +83,7 @@ def load_dataset() -> Dataset:
 	return load_from_disk(ATLASET_DATASET)
 
 
-def clean_dataset(Dataset) -> SentPairList:
+def clean_dataset(ds: Dataset) -> SentPairList:
 	logger.info("Cleaning dataset...")
 	pairs = []
 
@@ -98,19 +97,19 @@ def clean_dataset(Dataset) -> SentPairList:
 			logger.warning(e)
 			continue
 
-	en = clean_text(meta.get("english", ""))
-	darija = clean_text(ex["text"])
+		en = clean_text(meta.get("english", ""))
+		darija = clean_text(ex["text"])
 
-	if not en or not darija:
-		continue
+		if not en or not darija:
+			continue
 
-	if not (3 <= len(en.split()) <= MAX_WORDS):
-		continue
+		if not (3 <= len(en.split()) <= MAX_WORDS):
+			continue
 
-	if not (3 <= len(darija.split()) <= MAX_WORDS):
-		continue
+		if not (3 <= len(darija.split()) <= MAX_WORDS):
+			continue
 
-	pairs.append((en, "[start] " + darija + " [end]"))
+		pairs.append((en, "[start] " + darija + " [end]"))
 
 	logger.info(f"Total clean pairs: <green>{len(pairs)}</green>")
 
@@ -125,10 +124,12 @@ def split_dataset(pairs: SentPairList) -> tuple[SentPairList, SentPairList, Sent
 	num_train = len(pairs) - 2 * num_val
 
 	train_pairs = pairs[:num_train]
-	val_pairs = pairs[num_train:num_train + num_val]
-	test_pairs = pairs[num_train + num_val:]
+	val_pairs = pairs[num_train : num_train + num_val]
+	test_pairs = pairs[num_train + num_val :]
 
-	logger.info(f"<green>{len(train_pairs)}</green> train / <green>{len(val_pairs)}</green> val / <green>{len(test_pairs)}</green> test")
+	logger.info(
+		f"<green>{len(train_pairs)}</green> train / <green>{len(val_pairs)}</green> val / <green>{len(test_pairs)}</green> test"
+	)
 
 
 # Text standardization (pure Python)
@@ -140,23 +141,15 @@ def standardize(text):
 def build_vocab(train_pairs: SentPairList) -> tuple[StringLookup, StringLookup]:
 	logger.info("Building the vocabulary...")
 	vocab_size = 30_000
-	sequence_length = 50
-	batch_size = 64
 
 	def get_tokens(texts):
 		for t in texts:
 			for token in standardize(t).split():
 				yield token
 
-	eng_lookup = StringLookup(
-		max_tokens=vocab_size,
-		output_mode="int"
-	)
+	eng_lookup = StringLookup(max_tokens=vocab_size, output_mode="int")
 
-	ary_lookup = StringLookup(
-		max_tokens=vocab_size,
-		output_mode="int"
-	)
+	ary_lookup = StringLookup(max_tokens=vocab_size, output_mode="int")
 
 	eng_lookup.adapt(list(get_tokens([p[0] for p in train_pairs])))
 	ary_lookup.adapt(list(get_tokens([p[1] for p in train_pairs])))
@@ -171,7 +164,7 @@ def build_vocab(train_pairs: SentPairList) -> tuple[StringLookup, StringLookup]:
 def vectorize_eng(texts: list[str], eng_lookup: StringLookup) -> list[np.array]:
 	outputs = []
 	for t in texts:
-		tokens = standardize(t).split()[:sequence_length]
+		tokens = standardize(t).split()[:MAX_SEQUENCE_LENGTH]
 		token_ids = eng_lookup(tokens)
 		outputs.append(ops.convert_to_numpy(token_ids))
 	return outputs
@@ -180,7 +173,7 @@ def vectorize_eng(texts: list[str], eng_lookup: StringLookup) -> list[np.array]:
 def vectorize_ary(texts: list[str], ary_lookup: StringLookup) -> list[np.array]:
 	outputs = []
 	for t in texts:
-		tokens = standardize(t).split()[: sequence_length + 1]
+		tokens = standardize(t).split()[: MAX_SEQUENCE_LENGTH + 1]
 		token_ids = ary_lookup(tokens)
 		outputs.append(ops.convert_to_numpy(token_ids))
 	return outputs
@@ -190,28 +183,28 @@ def vectorize_ary(texts: list[str], ary_lookup: StringLookup) -> list[np.array]:
 def pad_sequences(seqs, max_len) -> list[np.array]:
 	padded = np.zeros((len(seqs), max_len), dtype="int32")
 	for i, s in enumerate(seqs):
-		padded[i, :len(s)] = s
+		padded[i, : len(s)] = s
 	return padded
 
 
 class TranslationDataset(keras.utils.PyDataset):
-	def __init__(self, pairs, eng_lookup=eng_lookup, ary_lookup=ary_lookup):
+	def __init__(self, pairs, eng_lookup=None, ary_lookup=None):
 		self.eng, self.darija = zip(*pairs)
 		self.eng_lookup = eng_lookup
 		self.ary_lookup = ary_lookup
 
 	def __len__(self):
-		return math.ceil(len(self.eng) / batch_size)
+		return math.ceil(len(self.eng) / BATCH_SIZE)
 
 	def __getitem__(self, idx):
-		start = idx * batch_size
-		end = start + batch_size
+		start = idx * BATCH_SIZE
+		end = start + BATCH_SIZE
 
 		eng = vectorize_eng(self.eng[start:end], self.eng_lookup)
 		dar = vectorize_ary(self.darija[start:end], self.ary_lookup)
 
-		eng = pad_sequences(eng, sequence_length)
-		dar = pad_sequences(dar, sequence_length + 1)
+		eng = pad_sequences(eng, MAX_SEQUENCE_LENGTH)
+		dar = pad_sequences(dar, MAX_SEQUENCE_LENGTH + 1)
 
 		return (
 			{
@@ -235,10 +228,10 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 		embedding_dim=EMBED_DIM,
 	)(encoder_inputs)
 
-	encoder_outputs = keras_hub.layers.TransformerEncoder(
-		intermediate_dim=INTERMEDIATE_DIM, num_heads=NUM_HEADS
-	)(inputs=x)
-	encoder = keras.Model(encoder_inputs, encoder_outputs)
+	encoder_outputs = keras_hub.layers.TransformerEncoder(intermediate_dim=INTERMEDIATE_DIM, num_heads=NUM_HEADS)(
+		inputs=x
+	)
+	# encoder = keras.Model(encoder_inputs, encoder_outputs)
 
 	# Decoder
 	decoder_inputs = keras.Input(shape=(None,), name="decoder_inputs")
@@ -250,11 +243,11 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 		embedding_dim=EMBED_DIM,
 	)(decoder_inputs)
 
-	x = keras_hub.layers.TransformerDecoder(
-		intermediate_dim=INTERMEDIATE_DIM, num_heads=NUM_HEADS
-	)(decoder_sequence=x, encoder_sequence=encoded_seq_inputs)
+	x = keras_hub.layers.TransformerDecoder(intermediate_dim=INTERMEDIATE_DIM, num_heads=NUM_HEADS)(
+		decoder_sequence=x, encoder_sequence=encoded_seq_inputs
+	)
 	x = keras.layers.Dropout(0.5)(x)
-	decoder_outputs = keras.layers.Dense(SPA_VOCAB_SIZE, activation="softmax")(x)
+	decoder_outputs = keras.layers.Dense(ARY_VOCAB_SIZE, activation="softmax")(x)
 	decoder = keras.Model(
 		[
 			decoder_inputs,
@@ -277,23 +270,21 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 def train_model(transformer: keras.Model, train_ds: TranslationDataset, val_ds: TranslationDataset) -> keras.Model:
 	logger.info("Training the model...")
 	transformer.summary()
-	transformer.compile(
-		"rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"]
-	)
+	transformer.compile("rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
 	transformer.fit(train_ds, epochs=EPOCHS, validation_data=val_ds)
 
 	return transformer
 
 
 # Inference
-def decode_sequence(keras.Model: transformer, sentence: str):
-	enc = pad_sequences(vectorize_eng([sentence]), sequence_length)
+def decode_sequence(transformer: keras.Model, ary_lookup: StringLookup, ary_index_lookup: dict[int, str], sentence: str):
+	enc = pad_sequences(vectorize_eng([sentence]), MAX_SEQUENCE_LENGTH)
 
 	decoded_ids = [int(ary_lookup("[start]"))]
 	end_id = int(ary_lookup("[end]"))
 
-	for _ in range(sequence_length):
-		dec = pad_sequences([decoded_ids], sequence_length)
+	for _ in range(MAX_SEQUENCE_LENGTH):
+		dec = pad_sequences([decoded_ids], MAX_SEQUENCE_LENGTH)
 
 		preds = transformer(
 			{
@@ -311,9 +302,8 @@ def decode_sequence(keras.Model: transformer, sentence: str):
 	return " ".join(ary_index_lookup[i] for i in decoded_ids)
 
 
-def save_experiment(transformer: keras.Model):
+def save_experiment(transformer: keras.Model, eng_lookup: StringLookup, ary_lookup: StringLookup, timestamp: str):
 	logger.info("Saving model...")
-	timestamp = time.strftime("%Y%m%d_%H%M%S")
 
 	exp_dir = REPORTS_DIR / f"{EXP_NAME}_{timestamp}"
 	exp_dir.mkdir(parents=True, exist_ok=True)
@@ -335,7 +325,7 @@ def save_experiment(transformer: keras.Model):
 
 
 # Evaluate on test set
-def eval_on_test(transformer: keras.Model, test_pairs: SentPairList):
+def eval_on_test(transformer: keras.Model, test_pairs: SentPairList) -> tuple[float, float]:
 	logger.info("Evaluating model on the test set...")
 	test_ds = TranslationDataset(test_pairs)
 
@@ -343,15 +333,18 @@ def eval_on_test(transformer: keras.Model, test_pairs: SentPairList):
 
 	print(f"Test loss: <blue>{test_loss:.4f}</blue>")
 	print(f"Test accuracy: <blue>{test_acc:.4f}</blue>")
+	return test_loss, test_acc
 
 
 # Qualitative inference examples
-def sample_inference(transformer: keras.Model, test_pairs: SentPairList):
+def sample_inference(
+	transformer: keras.Model, ary_lookup: StringLookup, ary_index_lookup: dict[int, str], test_pairs: SentPairList
+):
 	NUM_EXAMPLES = 20
 	examples = []
 
 	for eng, ref in random.sample(test_pairs, NUM_EXAMPLES):
-		pred = decode_sequence(transformer, eng)
+		pred = decode_sequence(transformer, ary_lookup, ary_index_lookup, eng)
 		examples.append(
 			{
 				"english": eng,
@@ -361,37 +354,8 @@ def sample_inference(transformer: keras.Model, test_pairs: SentPairList):
 		)
 
 	# Save examples
-	with open(exp_dir / "inference_examples.json", "w", encoding="utf-8") as f:
+	with open(REPORTS_DIR / "inference_examples.json", "w", encoding="utf-8") as f:
 		json.dump(examples, f, ensure_ascii=False, indent=2)
-
-
-# Save training metadata (for paper)
-def save_metadata():
-	experiment_metadata = {
-		"experiment_name": EXP_NAME,
-		"timestamp": timestamp,
-		"dataset": "Atlaset_corpus",
-		"num_pairs_total": len(pairs),
-		"num_train": len(train_pairs),
-		"num_val": len(val_pairs),
-		"num_test": len(test_pairs),
-		"sequence_length": sequence_length,
-		"batch_size": batch_size,
-		"embedding_dim": embed_dim,
-		"latent_dim": latent_dim,
-		"num_heads": num_heads,
-		"optimizer": "RMSprop",
-		"epochs": 10,
-		"eng_vocab_size": eng_vocab_size,
-		"ary_vocab_size": ary_vocab_size,
-		"test_loss": float(test_loss),
-		"test_accuracy": float(test_acc),
-	}
-
-	with open(REPORTS_DIR / "experiment_metadata.json", "w", encoding="utf-8") as f:
-		json.dump(experiment_metadata, f, indent=2)
-
-	logger.info("Experiment artifacts saved")
 
 
 @app.command()
@@ -411,12 +375,16 @@ def main():
 	print(x["decoder_inputs"].shape)
 	print(y.shape)
 
-	transformer = build_model(eng_lookup.vocabulary_size(), ary_lookup.vocabulary_size())
-	transformer = train_model(transformer)
+	eng_vocab_size = eng_lookup.vocabulary_size()
+	ary_vocab_size = ary_lookup.vocabulary_size()
 
-	save_experiment(transformer)
+	transformer = build_model(eng_vocab_size, ary_vocab_size)
+	transformer = train_model(transformer, train_ds, val_ds)
 
-	eval_on_test(transformer, test_pairs)
+	timestamp = time.strftime("%Y%m%d_%H%M%S")
+	save_experiment(transformer, eng_lookup, ary_lookup, timestamp)
+
+	test_loss, test_acc = eval_on_test(transformer, test_pairs)
 
 	# Inference
 	logger.info("Running an inference test on the trained model")
@@ -426,12 +394,37 @@ def main():
 	for _ in range(5):
 		s = random.choice(test_pairs)[0]
 		print("ENG:", s)
-		print("ARY:", decode_sequence(transformer, s))
+		print("ARY:", decode_sequence(transformer, ary_lookup, ary_index_lookup, s))
 		print()
 
-	sample_inference(transformer, test_pairs)
+	sample_inference(transformer, ary_lookup, ary_index_lookup, test_pairs)
 
-	save_metadata()
+	# Save training metadata (for paper)
+	experiment_metadata = {
+		"experiment_name": EXP_NAME,
+		"timestamp": timestamp,
+		"dataset": "Atlaset_corpus",
+		"num_pairs_total": len(pairs),
+		"num_train": len(train_pairs),
+		"num_val": len(val_pairs),
+		"num_test": len(test_pairs),
+		"sequence_length": MAX_SEQUENCE_LENGTH,
+		"batch_size": BATCH_SIZE,
+		"embedding_dim": EMBED_DIM,
+		"latent_dim": INTERMEDIATE_DIM,
+		"num_heads": NUM_HEADS,
+		"optimizer": "RMSprop",
+		"epochs": 10,
+		"eng_vocab_size": eng_vocab_size,
+		"ary_vocab_size": ary_vocab_size,
+		"test_loss": float(test_loss),
+		"test_accuracy": float(test_acc),
+	}
+
+	with open(REPORTS_DIR / "experiments_metadata.json", "a", encoding="utf-8") as f:
+		json.dump(experiment_metadata, f, indent=2)
+
+	logger.info("Experiment artifacts saved")
 
 
 if __name__ == "__main__":
