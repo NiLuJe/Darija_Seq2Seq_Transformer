@@ -7,6 +7,7 @@ pip
 python-dotenv
 rich
 ruff
+sentencepiece
 tqdm
 typer
 -e .

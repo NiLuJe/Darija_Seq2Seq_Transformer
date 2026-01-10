@@ -12,21 +12,23 @@ from functools import partial
 import html
 import json
 import math
+from pathlib import Path
 import re
+import tempfile
 import time
 import unicodedata
 
 from datasets import Dataset, load_from_disk
 import keras
 from keras import ops
-from keras.layers import StringLookup
 import keras_hub
 from loguru import logger
 import numpy as np
+import sentencepiece as spm
 import torch
 import typer
 
-from ary_seq2seq.config import ATLASET_DATASET, MODELS_DIR, REPORTS_DIR
+from ary_seq2seq.config import ATLASET_DATASET, REPORTS_DIR
 
 # Raise errors ASAP
 torch.autograd.set_detect_anomaly(True)
@@ -41,14 +43,14 @@ logger.opt = partial(logger.opt, colors=True)
 app = typer.Typer()
 
 # -------- experiment directory --------
-EXP_NAME = "darija_en_transformer_baseline"
+EXP_NAME = "darija_en_transformer_spm"
 
 # parms/hparms
 BATCH_SIZE = 128
 EPOCHS = 10
-MAX_SEQUENCE_LENGTH = 50
-ENG_VOCAB_SIZE = 15000
-ARY_VOCAB_SIZE = 15000
+SEQUENCE_LENGTH = 50
+VOCAB_SIZE = 30_000
+PAD_ID = 0
 
 EMBED_DIM = 256
 INTERMEDIATE_DIM = 2048
@@ -76,7 +78,6 @@ def clean_text(text):
 	return text.strip()
 
 
-# TODO: Fancier tokenizers?
 # -------- load dataset --------
 def load_dataset() -> Dataset:
 	logger.info("Loading dataset from disk...")
@@ -87,7 +88,7 @@ def clean_dataset(ds: Dataset) -> SentPairList:
 	logger.info("Cleaning dataset...")
 	pairs = []
 
-	MAX_ROWS = 20_000
+	MAX_ROWS = 20_000  # FIXME: 500_000
 	MAX_WORDS = 50
 
 	for ex in ds["train"].select(range(MAX_ROWS)):
@@ -102,14 +103,12 @@ def clean_dataset(ds: Dataset) -> SentPairList:
 
 		if not en or not darija:
 			continue
-
 		if not (3 <= len(en.split()) <= MAX_WORDS):
 			continue
-
 		if not (3 <= len(darija.split()) <= MAX_WORDS):
 			continue
 
-		pairs.append((en, "[start] " + darija + " [end]"))
+		pairs.append((en, f"[start] {darija} [end]"))
 
 	logger.info(f"Total clean pairs: <green>{len(pairs)}</green>")
 
@@ -134,66 +133,73 @@ def split_dataset(pairs: SentPairList) -> tuple[SentPairList, SentPairList, Sent
 	return train_pairs, val_pairs, test_pairs
 
 
-# Text standardization (pure Python)
+# Text standardization
 def standardize(text: str) -> str:
-	return text.lower()
+	return text.lower().strip()
 
 
-# Vocabulary via StringLookup (Torch compatible)
-def build_vocab(train_pairs: SentPairList) -> tuple[StringLookup, StringLookup]:
-	logger.info("Building the vocabulary...")
-	vocab_size = 30_000
-
-	def get_tokens(texts):
+# Train SentencePiece tokenizers
+def train_spm(texts: list[str], prefix: str):
+	with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as f:
 		for t in texts:
-			for token in standardize(t).split():
-				yield token
+			f.write(standardize(t) + "\n")
+		fname = f.name
 
-	eng_lookup = StringLookup(max_tokens=vocab_size, output_mode="int")
-
-	ary_lookup = StringLookup(max_tokens=vocab_size, output_mode="int")
-
-	eng_lookup.adapt(list(get_tokens([p[0] for p in train_pairs])))
-	ary_lookup.adapt(list(get_tokens([p[1] for p in train_pairs])))
-
-	logger.info(f"ENG vocab size: <green>{eng_lookup.vocabulary_size()}</green>")
-	logger.info(f"ARY vocab size: <green>{ary_lookup.vocabulary_size()}</green>")
-
-	return eng_lookup, ary_lookup
-
-
-# Vectorization helpers
-def vectorize_eng(texts: list[str], eng_lookup: StringLookup) -> list[np.array]:
-	outputs = []
-	for t in texts:
-		tokens = standardize(t).split()[:MAX_SEQUENCE_LENGTH]
-		token_ids = eng_lookup(tokens)
-		outputs.append(ops.convert_to_numpy(token_ids))
-	return outputs
+	spm.SentencePieceTrainer.train(
+		input=fname,
+		model_prefix=prefix,
+		vocab_size=VOCAB_SIZE,
+		model_type="bpe",
+		character_coverage=0.9995,
+		byte_fallback=True,
+		user_defined_symbols=["[start]", "[end]"],
+		pad_id=0,
+		unk_id=1,
+		bos_id=-1,
+		eos_id=-1,
+	)
+	os.remove(fname)
 
 
-def vectorize_ary(texts: list[str], ary_lookup: StringLookup) -> list[np.array]:
-	outputs = []
-	for t in texts:
-		tokens = standardize(t).split()[: MAX_SEQUENCE_LENGTH + 1]
-		token_ids = ary_lookup(tokens)
-		outputs.append(ops.convert_to_numpy(token_ids))
-	return outputs
+def train_tokenizers(train_pairs: SentPairList) -> None:
+	logger.info("Training EN tokenizer...")
+	train_spm([p[0] for p in train_pairs], "spm_en")
+
+	logger.info("Training ARY tokenizer...")
+	train_spm([p[1] for p in train_pairs], "spm_ary")
 
 
-# Torch-compatible dataset
-def pad_sequences(seqs, max_len) -> list[np.array]:
-	padded = np.zeros((len(seqs), max_len), dtype="int32")
-	for i, s in enumerate(seqs):
-		padded[i, : len(s)] = s
-	return padded
+# Load SentencePiece models
+def load_tokenizers() -> tuple[spm.SentencePieceProcessor, spm.SentencePieceProcessor]:
+	sp_en = spm.SentencePieceProcessor()
+	sp_en.load("spm_en.model")
+
+	sp_ary = spm.SentencePieceProcessor()
+	sp_ary.load("spm_ary.model")
+
+	return sp_en, sp_ary
 
 
+# Vectorization utilities
+def pad_or_truncate(seq, max_len: int):
+	seq = seq[:max_len]
+	return seq + [PAD_ID] * (max_len - len(seq))
+
+
+def encode_en(sp_en: spm.SentencePieceProcessor, text: str):
+	return pad_or_truncate(sp_en.encode(standardize(text), out_type=int), SEQUENCE_LENGTH)
+
+
+def encode_ary(sp_ary: spm.SentencePieceProcessor, text: str):
+	return pad_or_truncate(sp_ary.encode(standardize(text), out_type=int), SEQUENCE_LENGTH + 1)
+
+
+# Torch-compatible Dataset
 class TranslationDataset(keras.utils.PyDataset):
-	def __init__(self, eng_lookup, ary_lookup, pairs, **kwargs):
-		self.eng, self.darija = zip(*pairs)
-		self.eng_lookup = eng_lookup
-		self.ary_lookup = ary_lookup
+	def __init__(self, sp_en, sp_ary, pairs, **kwargs):
+		self.eng, self.ary = zip(*pairs)
+		self.sp_en = sp_en
+		self.sp_ary = sp_ary
 		super().__init__(**kwargs)
 
 	def __len__(self):
@@ -203,18 +209,15 @@ class TranslationDataset(keras.utils.PyDataset):
 		start = idx * BATCH_SIZE
 		end = start + BATCH_SIZE
 
-		eng = vectorize_eng(self.eng[start:end], self.eng_lookup)
-		dar = vectorize_ary(self.darija[start:end], self.ary_lookup)
-
-		eng = pad_sequences(eng, MAX_SEQUENCE_LENGTH)
-		dar = pad_sequences(dar, MAX_SEQUENCE_LENGTH + 1)
+		enc = np.array([encode_en(self.sp_en, t) for t in self.eng[start:end]], dtype="int32")
+		dec = np.array([encode_ary(self.sp_ary, t) for t in self.ary[start:end]], dtype="int32")
 
 		return (
 			{
-				"encoder_inputs": eng,
-				"decoder_inputs": dar[:, :-1],
+				"encoder_inputs": enc,
+				"decoder_inputs": dec[:, :-1],
 			},
-			dar[:, 1:],
+			dec[:, 1:],
 		)
 
 
@@ -227,7 +230,7 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 	# TODO: Switch to ROPE & GeLu
 	x = keras_hub.layers.TokenAndPositionEmbedding(
 		vocabulary_size=ENG_VOCAB_SIZE,
-		sequence_length=MAX_SEQUENCE_LENGTH,
+		sequence_length=SEQUENCE_LENGTH,
 		embedding_dim=EMBED_DIM,
 	)(encoder_inputs)
 
@@ -242,7 +245,7 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 
 	x = keras_hub.layers.TokenAndPositionEmbedding(
 		vocabulary_size=ARY_VOCAB_SIZE,
-		sequence_length=MAX_SEQUENCE_LENGTH,
+		sequence_length=SEQUENCE_LENGTH,
 		embedding_dim=EMBED_DIM,
 	)(decoder_inputs)
 
@@ -282,36 +285,42 @@ def train_model(transformer: keras.Model, train_ds: TranslationDataset, val_ds: 
 # Inference
 def decode_sequence(
 	transformer: keras.Model,
-	eng_lookup: StringLookup,
-	ary_lookup: StringLookup,
-	ary_index_lookup: dict[int, str],
+	sp_en: spm.SentencePieceProcessor,
+	sp_ary: spm.SentencePieceProcessor,
 	sentence: str,
 ) -> str:
-	enc = pad_sequences(vectorize_eng([sentence], eng_lookup), MAX_SEQUENCE_LENGTH)
+	START_ID = sp_ary.piece_to_id("[start]")
+	END_ID = sp_ary.piece_to_id("[end]")
 
-	decoded_ids = [int(ary_lookup("[start]"))]
-	end_id = int(ary_lookup("[end]"))
+	enc = np.array([encode_en(sp_en, sentence)], dtype="int32")
+	decoded = [START_ID]
 
-	for _ in range(MAX_SEQUENCE_LENGTH):
-		dec = pad_sequences([decoded_ids], MAX_SEQUENCE_LENGTH)
+	for _ in range(SEQUENCE_LENGTH):
+		dec = pad_or_truncate(decoded, SEQUENCE_LENGTH)
+		dec = np.array([dec], dtype="int32")
 
 		preds = transformer(
 			{
 				"encoder_inputs": enc,
 				"decoder_inputs": dec,
-			}
+			},
+			training=False,
 		)
 
-		next_id = int(ops.argmax(preds[0, len(decoded_ids) - 1]))
-		decoded_ids.append(next_id)
+		next_id = int(ops.argmax(preds[0, len(decoded) - 1]))
+		decoded.append(next_id)
 
-		if next_id == end_id:
+		if next_id == END_ID:
 			break
 
-	return " ".join(ary_index_lookup[i] for i in decoded_ids)
+	pieces = [sp_ary.id_to_piece(i) for i in decoded]
+	pieces = [p for p in pieces if p not in ("[start]", "[end]")]
+	return sp_ary.decode_pieces(pieces)
 
 
-def save_experiment(transformer: keras.Model, eng_lookup: StringLookup, ary_lookup: StringLookup, timestamp: str) -> None:
+def save_experiment(
+	transformer: keras.Model, sp_en: spm.SentencePieceProcessor, sp_ary: spm.SentencePieceProcessor, timestamp: str
+) -> Path:
 	logger.info("Saving model...")
 
 	exp_dir = REPORTS_DIR / f"{EXP_NAME}_{timestamp}"
@@ -320,25 +329,24 @@ def save_experiment(transformer: keras.Model, eng_lookup: StringLookup, ary_look
 	logger.info(f"Saving experiment to <magenta>{exp_dir}</magenta>")
 
 	# Save model
-	model_path = MODELS_DIR / "ary.keras"
+	model_path = exp_dir / "ary.keras"
 	transformer.save(model_path)
 
 	# Save vocabularies
-	with open(REPORTS_DIR / "eng_vocab.txt", "w", encoding="utf-8") as f:
-		for tok in eng_lookup.get_vocabulary():
-			f.write(tok + "\n")
+	with open(exp_dir / "eng_vocab.txt", "w", encoding="utf-8") as f:
+		for i in range(sp_en.get_piece_size()):
+			f.write(sp_en.id_to_piece(i) + "\n")
 
-	with open(REPORTS_DIR / "ary_vocab.txt", "w", encoding="utf-8") as f:
-		for tok in ary_lookup.get_vocabulary():
-			f.write(tok + "\n")
+	with open(exp_dir / "ary_vocab.txt", "w", encoding="utf-8") as f:
+		for i in range(sp_ary.get_piece_size()):
+			f.write(sp_ary.id_to_piece(i) + "\n")
+
+	return exp_dir
 
 
 # Evaluate on test set
-def eval_on_test(
-	transformer: keras.Model, eng_lookup: StringLookup, ary_lookup: StringLookup, test_pairs: SentPairList
-) -> tuple[float, float]:
+def eval_on_test(transformer: keras.Model, test_ds: TranslationDataset) -> tuple[float, float]:
 	logger.info("Evaluating model on the test set...")
-	test_ds = TranslationDataset(eng_lookup, ary_lookup, test_pairs)
 
 	test_loss, test_acc = transformer.evaluate(test_ds, verbose=0)
 
@@ -350,16 +358,16 @@ def eval_on_test(
 # Qualitative inference examples
 def sample_inference(
 	transformer: keras.Model,
-	eng_lookup: StringLookup,
-	ary_lookup: StringLookup,
-	ary_index_lookup: dict[int, str],
+	sp_en: spm.SentencePieceProcessor,
+	sp_ary: spm.SentencePieceProcessor,
 	test_pairs: SentPairList,
+	exp_dir: Path,
 ) -> None:
 	NUM_EXAMPLES = 20
 	examples = []
 
 	for eng, ref in random.sample(test_pairs, NUM_EXAMPLES):
-		pred = decode_sequence(transformer, eng_lookup, ary_lookup, ary_index_lookup, eng)
+		pred = decode_sequence(transformer, sp_en, sp_ary, eng)
 		examples.append(
 			{
 				"english": eng,
@@ -369,7 +377,7 @@ def sample_inference(
 		)
 
 	# Save examples
-	with open(REPORTS_DIR / "inference_examples.json", "w", encoding="utf-8") as f:
+	with open(exp_dir / "inference_examples.json", "w", encoding="utf-8") as f:
 		json.dump(examples, f, ensure_ascii=False, indent=2)
 
 
@@ -379,42 +387,46 @@ def main():
 	pairs = clean_dataset(ds)
 	train_pairs, val_pairs, test_pairs = split_dataset(pairs)
 
-	eng_lookup, ary_lookup = build_vocab(train_pairs)
+	train_tokenizers(train_pairs)
+	sp_en, sp_ary = load_tokenizers()
 
-	train_ds = TranslationDataset(eng_lookup, ary_lookup, train_pairs)
-	val_ds = TranslationDataset(eng_lookup, ary_lookup, val_pairs)
+	eng_vocab_size = sp_en.get_piece_size()
+	ary_vocab_size = sp_ary.get_piece_size()
 
-	logger.info("Sanity-check the first train sample:")
-	x, y = train_ds[0]
-	print(x["encoder_inputs"].shape)
-	print(x["decoder_inputs"].shape)
-	print(y.shape)
+	logger.info(f"ENG vocab size: <green>{eng_vocab_size}</green>")
+	logger.info(f"ARY vocab size: <green>{ary_vocab_size}</green>")
 
-	eng_vocab_size = eng_lookup.vocabulary_size()
-	ary_vocab_size = ary_lookup.vocabulary_size()
+	train_ds = TranslationDataset(sp_en, sp_ary, train_pairs)
+	val_ds = TranslationDataset(sp_en, sp_ary, val_pairs)
+	test_ds = TranslationDataset(sp_en, sp_ary, test_pairs)
+
+	logger.info("Sanity-check the data splits:")
+	logger.info("train:")
+	print(train_ds[0])
+	logger.info("val:")
+	print(val_ds[0])
+	logger.info("test:")
+	print(test_ds[0])
 
 	transformer = build_model(eng_vocab_size, ary_vocab_size)
 	transformer = train_model(transformer, train_ds, val_ds)
 
 	timestamp = time.strftime("%Y%m%d_%H%M%S")
-	save_experiment(transformer, eng_lookup, ary_lookup, timestamp)
+	exp_dir = save_experiment(transformer, sp_en, sp_ary, timestamp)
 
-	test_loss, test_acc = eval_on_test(transformer, eng_lookup, ary_lookup, test_pairs)
+	test_loss, test_acc = eval_on_test(transformer, test_ds)
 
 	# Inference
 	logger.info("Running an inference test on the trained model")
-	ary_vocab = ary_lookup.get_vocabulary()
-	ary_index_lookup = dict(enumerate(ary_vocab))
-
 	for _ in range(5):
 		s = random.choice(test_pairs)[0]
 		print("ENG:", s)
-		print("ARY:", decode_sequence(transformer, eng_lookup, ary_lookup, ary_index_lookup, s))
+		print("ARY:", decode_sequence(transformer, sp_en, sp_ary, s))
 		print()
 
-	sample_inference(transformer, eng_lookup, ary_lookup, ary_index_lookup, test_pairs)
+	sample_inference(transformer, sp_en, sp_ary, test_pairs, exp_dir)
 
-	# Save training metadata (for paper)
+	# Save training metadata
 	experiment_metadata = {
 		"experiment_name": EXP_NAME,
 		"timestamp": timestamp,
@@ -423,7 +435,7 @@ def main():
 		"num_train": len(train_pairs),
 		"num_val": len(val_pairs),
 		"num_test": len(test_pairs),
-		"sequence_length": MAX_SEQUENCE_LENGTH,
+		"sequence_length": SEQUENCE_LENGTH,
 		"batch_size": BATCH_SIZE,
 		"embedding_dim": EMBED_DIM,
 		"latent_dim": INTERMEDIATE_DIM,
@@ -436,7 +448,7 @@ def main():
 		"test_accuracy": float(test_acc),
 	}
 
-	with open(REPORTS_DIR / "experiments_metadata.json", "a", encoding="utf-8") as f:
+	with open(exp_dir / "experiments_metadata.json", "w", encoding="utf-8") as f:
 		json.dump(experiment_metadata, f, indent=2)
 
 	logger.info("Experiment artifacts saved")
