@@ -204,10 +204,25 @@ def encode_ary(sp_ary: spm.SentencePieceProcessor, text: str) -> list[int]:
 # Torch-compatible Dataset
 class TranslationDataset(keras.utils.PyDataset):
 	def __init__(self, sp_en, sp_ary, pairs, **kwargs):
-		self.eng, self.ary = zip(*pairs)
+		super().__init__(**kwargs)
+
 		self.sp_en = sp_en
 		self.sp_ary = sp_ary
-		super().__init__(**kwargs)
+		self.eng, self.ary = zip(*pairs)
+
+		# Pad/trim `enc` to `SEQUENCE_LENGTH`
+		self.enc_start_end_packer = keras_hub.layers.StartEndPacker(
+			sequence_length=SEQUENCE_LENGTH,
+			pad_value=PAD_ID,
+		)
+
+		# Add special tokens (START & END) to `dec` and pad/trim it as well
+		self.dec_start_end_packer = keras_hub.layers.StartEndPacker(
+			sequence_length=SEQUENCE_LENGTH + 1,
+			start_value=self.sp_ary.piece_to_id(START_TOKEN),
+			end_value=self.sp_ary.piece_to_id(END_TOKEN),
+			pad_value=PAD_ID,
+		)
 
 	def __len__(self):
 		return math.ceil(len(self.eng) / BATCH_SIZE)
@@ -216,22 +231,8 @@ class TranslationDataset(keras.utils.PyDataset):
 		start = idx * BATCH_SIZE
 		end = start + BATCH_SIZE
 
-		# Pad/trim `enc` to `SEQUENCE_LENGTH`
-		enc_start_end_packer = keras_hub.layers.StartEndPacker(
-			sequence_length=SEQUENCE_LENGTH,
-			pad_value=PAD_ID,
-		)
-
-		# Add special tokens (START & END) to `dec` and pad/trim it as well
-		dec_start_end_packer = keras_hub.layers.StartEndPacker(
-			sequence_length=SEQUENCE_LENGTH + 1,
-			start_value=self.sp_ary.piece_to_id(START_TOKEN),
-			end_value=self.sp_ary.piece_to_id(END_TOKEN),
-			pad_value=PAD_ID,
-		)
-
-		enc = ops.convert_to_tensor([enc_start_end_packer(self.sp_en.encode(t)) for t in self.eng[start:end]])
-		dec = ops.convert_to_tensor([dec_start_end_packer(self.sp_ary.encode(t)) for t in self.ary[start:end]])
+		enc = self.enc_start_end_packer(tf.ragged.constant(self.sp_en.encode(list(self.eng[start:end]))))
+		dec = self.dec_start_end_packer(tf.ragged.constant(self.sp_ary.encode(list(self.ary[start:end]))))
 
 		return (
 			{
