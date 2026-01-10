@@ -222,7 +222,7 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 	# Encoder
 	encoder_inputs = keras.Input(shape=(None,), name="encoder_inputs")
 
-	# TODO: Switch to ROPE & GeLu
+	# TODO: Switch to RoPE & SwiGLU
 	x = keras_hub.layers.TokenAndPositionEmbedding(
 		vocabulary_size=ENG_VOCAB_SIZE,
 		sequence_length=SEQUENCE_LENGTH,
@@ -271,7 +271,7 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 def train_model(transformer: keras.Model, train_ds: TranslationDataset, val_ds: TranslationDataset) -> keras.Model:
 	logger.info("Training the model...")
 	transformer.summary()
-	transformer.compile("rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+	transformer.compile(optimizer="rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
 	transformer.fit(train_ds, epochs=EPOCHS, validation_data=val_ds)
 
 	return transformer
