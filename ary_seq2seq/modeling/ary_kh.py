@@ -37,6 +37,7 @@ from loguru import logger
 import numpy as np
 import sentencepiece as spm
 import tensorflow as tf
+import tensorflow.data as tf_data
 
 # import torch
 # Raise errors ASAP
@@ -229,6 +230,47 @@ class TranslationDataset(keras.utils.PyDataset):
 		)
 
 
+# Pad & batch in a TF Dataset
+def make_dataset(pairs: SentPairList, sp_en: spm.SentencePieceProcessor, sp_ary: spm.SentencePieceProcessor):
+	def preprocess_batch(eng: tf.Tensor, ary: tf.Tensor):
+		# NOTE: spm encode returns a list of ints, make fancy on-device tensors out of those
+		eng = ops.convert_to_tensor(np.array(sp_en.encode(eng, out_type=int), dtype="int32"))
+		ary = ops.convert_to_tensor(np.array(sp_ary.encode(ary, out_type=int), dtype="int32"))
+
+		# Pad `eng` to `SEQUENCE_LENGTH`.
+		eng_start_end_packer = keras_hub.layers.StartEndPacker(
+			sequence_length=SEQUENCE_LENGTH,
+			pad_value=PAD_ID,
+		)
+		eng = eng_start_end_packer(eng)
+
+		# Add special tokens (START & END) to `ary` and pad it as well.
+		ary_start_end_packer = keras_hub.layers.StartEndPacker(
+			sequence_length=SEQUENCE_LENGTH + 1,
+			start_value=sp_ary.piece_to_id(START_TOKEN),
+			end_value=sp_ary.piece_to_id(END_TOKEN),
+			pad_value=PAD_ID,
+		)
+		ary = ary_start_end_packer(ary)
+
+		return (
+			{
+				"encoder_inputs": eng,
+				"decoder_inputs": ary[:, :-1],
+			},
+			ary[:, 1:],
+		)
+
+	eng_texts, ary_texts = zip(*pairs)
+	eng_texts = [standardize(t) for t in eng_texts]
+	ary_texts = [standardize(t) for t in ary_texts]
+	dataset = tf_data.Dataset.from_tensor_slices((eng_texts, ary_texts))
+	dataset = dataset.batch(BATCH_SIZE)
+	dataset = dataset.map(preprocess_batch, num_parallel_calls=tf_data.AUTOTUNE)
+
+	return dataset.shuffle(2048).prefetch(16).cache()
+
+
 # Build model
 def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 	logger.info("Building the model...")
@@ -291,41 +333,6 @@ def train_model(transformer: keras.Model, train_ds: TranslationDataset, val_ds: 
 
 
 # Inference
-def decode_sequence(
-	transformer: keras.Model,
-	sp_en: spm.SentencePieceProcessor,
-	sp_ary: spm.SentencePieceProcessor,
-	sentence: str,
-) -> str:
-	START_ID = sp_ary.piece_to_id(START_TOKEN)
-	END_ID = sp_ary.piece_to_id(END_TOKEN)
-
-	enc = np.array([encode_en(sp_en, sentence)], dtype="int32")
-	decoded = [START_ID]
-
-	for _ in range(SEQUENCE_LENGTH):
-		dec = pad_or_truncate(decoded, SEQUENCE_LENGTH)
-		dec = np.array([dec], dtype="int32")
-
-		preds = transformer(
-			{
-				"encoder_inputs": enc,
-				"decoder_inputs": dec,
-			},
-			training=False,
-		)
-
-		next_id = int(ops.argmax(preds[0, len(decoded) - 1]))
-		decoded.append(next_id)
-
-		if next_id == END_ID:
-			break
-
-	pieces = [sp_ary.id_to_piece(i) for i in decoded]
-	pieces = [p for p in pieces if p not in (START_TOKEN, END_TOKEN)]
-	return sp_ary.decode_pieces(pieces)
-
-
 def decode_sequences(
 	transformer: keras.Model,
 	sp_en: spm.SentencePieceProcessor,
@@ -447,9 +454,9 @@ def main():
 	logger.info(f"ENG vocab size: <green>{eng_vocab_size}</green>")
 	logger.info(f"ARY vocab size: <green>{ary_vocab_size}</green>")
 
-	train_ds = TranslationDataset(sp_en, sp_ary, train_pairs)
-	val_ds = TranslationDataset(sp_en, sp_ary, val_pairs)
-	test_ds = TranslationDataset(sp_en, sp_ary, test_pairs)
+	train_ds = make_dataset(train_pairs, sp_en, sp_ary)
+	val_ds = make_dataset(val_pairs, sp_en, sp_ary)
+	test_ds = make_dataset(test_pairs, sp_en, sp_ary)
 
 	logger.info("Sanity-check the data splits:")
 	logger.info("train:")
