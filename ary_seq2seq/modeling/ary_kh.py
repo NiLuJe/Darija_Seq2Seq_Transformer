@@ -307,6 +307,8 @@ def decode_sequences(
 			dtype=encoder_input_tokens.dtype,
 		)
 		encoder_input_tokens = ops.concatenate([encoder_input_tokens, pads], 1)
+	elif ops.shape(encoder_input_tokens)[1] > SEQUENCE_LENGTH:
+		encoder_input_tokens = encoder_input_tokens[..., :SEQUENCE_LENGTH]
 
 	# Define a function that outputs the next token's probability given the input sequence
 	def next(prompt: tf.Tensor, cache, index: int):
