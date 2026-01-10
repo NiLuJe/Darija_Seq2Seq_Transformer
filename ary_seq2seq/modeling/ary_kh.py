@@ -47,6 +47,7 @@ import tensorflow as tf
 import typer
 
 from ary_seq2seq.config import ATLASET_DATASET, REPORTS_DIR
+from ary_seq2seq.modeling.colmo import TransformerBlock
 
 type SentPair = tuple[str, str]
 type SentPairList = list[SentPair]
@@ -58,7 +59,7 @@ logger.opt = partial(logger.opt, colors=True)
 app = typer.Typer()
 
 # -------- experiment directory --------
-EXP_NAME = "darija_en_transformer_spm_kh"
+EXP_NAME = "darija_en_transformer_spm_kh_colmo"
 
 # parms/hparms
 BATCH_SIZE = 128
@@ -73,6 +74,12 @@ EMBED_DIM = 256
 INTERMEDIATE_DIM = 2048
 NUM_HEADS = 8
 
+# Decoder-specific
+N_KV_HEADS = 4  # NUM_HEADS//2; KV heads in GQA, 1 per GPU
+NUM_BLOCKS = 1  # Number of transformer blocks; 12 in gpt2, 3 in gpt nano
+# The hidden dimension of the feed-forward network in the FF block = 4 * embedding with ReLU activation,
+# 8/3 * embedding with SwiGLU to keep n. of computations constant
+FEED_FORWARD_DIM = int(EMBED_DIM * 8 / 3)
 
 # -------- cleaning utilities --------
 HTML_TAG_RE = re.compile(r"<[^>]+>")
@@ -236,6 +243,7 @@ class TranslationDataset(keras.utils.PyDataset):
 # Build model
 def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 	logger.info("Building the model...")
+
 	# Encoder
 	encoder_inputs = keras.Input(shape=(None,), name="encoder_inputs")
 
@@ -249,6 +257,49 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 		inputs=x
 	)
 	# encoder = keras.Model(encoder_inputs, encoder_outputs)
+
+	# Fancy Decoder
+	decoder_inputs = keras.Input(shape=(None,), name="decoder_inputs")
+	encoded_seq_inputs = keras.Input(shape=(None, EMBED_DIM), name="decoder_state_inputs")
+
+	x = keras.layers.Embedding(input_dim=ARY_VOCAB_SIZE, output_dim=EMBED_DIM)(decoder_inputs)
+
+	for i in range(NUM_BLOCKS):
+		x = TransformerBlock(
+			NUM_HEADS,
+			N_KV_HEADS,
+			EMBED_DIM,
+			FEED_FORWARD_DIM,
+			dropout_rate=0.2,
+			name=f"transformer_block_{i}",
+		)(x)
+
+	x = keras.layers.LayerNormalization()(x)
+
+	decoder_outputs = keras.layers.Dense(
+		ARY_VOCAB_SIZE,
+		use_bias=False,
+		# activation="softmax" #we'll use the logits
+		dtype="float32",
+		name="output",
+	)(x)
+
+	decoder = keras.Model(
+		[
+			decoder_inputs,
+			encoded_seq_inputs,
+		],
+		decoder_outputs,
+	)
+	decoder_outputs = decoder([decoder_inputs, encoder_outputs])
+
+	transformer = keras.Model(
+		[encoder_inputs, decoder_inputs],
+		decoder_outputs,
+		name="transformer",
+	)
+
+	return transformer
 
 	# Decoder
 	decoder_inputs = keras.Input(shape=(None,), name="decoder_inputs")
@@ -324,7 +375,24 @@ def train_model(
 		verbose=1,
 	)
 
-	transformer.compile(optimizer="rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+	# Optimizer with decaying weights
+	optimizer = keras.optimizers.AdamW(
+		learning_rate=1e-5,
+		weight_decay=0.2,
+		beta_1=0.9,
+		beta_2=0.95,
+		epsilon=1e-5,
+	)
+
+	# transformer.compile(optimizer="rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+
+	transformer.compile(
+		optimizer=optimizer,
+		loss=[keras.losses.SparseCategoricalCrossentropy(from_logits=True)],
+		# metrics=[keras_hub.metrics.Perplexity(from_logits=True, mask_token_id=0)],
+		metrics=["accuracy"],
+	)
+
 
 	history = transformer.fit(
 		train_ds, epochs=EPOCHS, validation_data=val_ds, callbacks=[earlystop, tensorboard, checkpoint], verbose=1
