@@ -121,7 +121,7 @@ def clean_dataset(ds: Dataset) -> SentPairList:
 		if not (3 <= len(darija.split()) <= MAX_WORDS):
 			continue
 
-		pairs.append((en, f"{START_TOKEN} {darija} {END_TOKEN}"))
+		pairs.append((en, darija))
 
 	logger.info(f"Total clean pairs: <green>{len(pairs)}</green>")
 
@@ -187,21 +187,7 @@ def load_tokenizers() -> tuple[spm.SentencePieceProcessor, spm.SentencePieceProc
 	return sp_en, sp_ary
 
 
-# Vectorization utilities
-def pad_or_truncate(seq: list[int], max_len: int) -> list[int]:
-	seq = seq[:max_len]
-	return seq + [PAD_ID] * (max_len - len(seq))
-
-
-def encode_en(sp_en: spm.SentencePieceProcessor, text: str) -> list[int]:
-	return pad_or_truncate(sp_en.encode(standardize(text), out_type=int), SEQUENCE_LENGTH)
-
-
-def encode_ary(sp_ary: spm.SentencePieceProcessor, text: str) -> list[int]:
-	return pad_or_truncate(sp_ary.encode(standardize(text), out_type=int), SEQUENCE_LENGTH + 1)
-
-
-# Torch-compatible Dataset
+# Torch-compatible Dataset (because tf.Dataset is pain.)
 class TranslationDataset(keras.utils.PyDataset):
 	def __init__(self, sp_en, sp_ary, pairs, **kwargs):
 		super().__init__(**kwargs)
