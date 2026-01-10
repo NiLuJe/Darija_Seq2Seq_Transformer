@@ -14,7 +14,6 @@ import json
 import math
 from pathlib import Path
 import re
-import tempfile
 import time
 import unicodedata
 
@@ -329,13 +328,11 @@ def save_experiment(
 	transformer.save(model_path)
 
 	# Save vocabularies
-	with open(exp_dir / "eng_vocab.txt", "w", encoding="utf-8") as f:
-		for i in range(sp_en.get_piece_size()):
-			f.write(sp_en.id_to_piece(i) + "\n")
+	en_vocab = [sp_en.id_to_piece(i) for i in range(sp_en.get_piece_size())]
+	(exp_dir / "eng_vocab.txt").write_text("\n".join(en_vocab), encoding="utf-8")
 
-	with open(exp_dir / "ary_vocab.txt", "w", encoding="utf-8") as f:
-		for i in range(sp_ary.get_piece_size()):
-			f.write(sp_ary.id_to_piece(i) + "\n")
+	ary_vocab = [sp_ary.id_to_piece(i) for i in range(sp_ary.get_piece_size())]
+	(exp_dir / "ary_vocab.txt").write_text("\n".join(ary_vocab), encoding="utf-8")
 
 	return exp_dir
 
