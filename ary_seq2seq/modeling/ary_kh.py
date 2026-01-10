@@ -3,13 +3,15 @@
 import os
 import random
 
-# NOTE: Switch to the torch backend, it appears to be slightly faster on AMD.
+# NOTE: Switch to the torch backend, it appears to be slightly faster on AMD (in some cases...).
 os.environ["KERAS_BACKEND"] = "torch"  # noqa: E402
 # NOTE: And when we're *not* using the torch backend,
-#       don't let tensorflow/xla alloc a giant block of VRAM on startup,
+#       don't let tensorflow alloc a giant block of VRAM on startup,
 #       because it makes for a *really* bad time when the driver decides
 #       to relocate it to GTT to accomodate another smaller alloc...
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+# NOTE: Same deal for XLA...
+# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 random.seed(42)  # noqa: E402
 
 import ast
@@ -25,6 +27,8 @@ import unicodedata
 
 from datasets import Dataset, load_from_disk
 import keras
+# Flash Attention should no longer be experimental on my GPU in ROCm...
+keras.config.enable_flash_attention()  # noqa: E402
 from keras import ops
 import keras_hub
 from loguru import logger
