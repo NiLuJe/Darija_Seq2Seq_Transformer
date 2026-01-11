@@ -7,7 +7,8 @@ from ary_seq2seq.modeling.colmo import FFNSwiGLU2
 
 
 class TransformerDecoderSwiGLU(TransformerDecoder):
-	# Just overwirte the first FFN to avoid code duplication...
+	# Overload the minimal amount of stuff possible:
+	# we just want to overwrite the first FFN to avoid code duplication...
 	# On the flipside, if the internal fields ever change names, we're screwed ;).
 	def build(
 		self,
@@ -15,13 +16,15 @@ class TransformerDecoderSwiGLU(TransformerDecoder):
 		encoder_sequence_shape=None,
 		**kwargs,
 	):
+		# Whee, inheritance magic!
 		super(TransformerDecoderSwiGLU, self).build(
 			decoder_sequence_shape, encoder_sequence_shape=encoder_sequence_shape, **kwargs
 		)
 
-		# The graph basically looks like:
+		# The segment of the graph we care about basically looks like:
 		# `_feedforward_intermediate_dense` -> `_feedforward_output_dense` -> `_feedforward_dropout`
-		# With a `_feedforward_layer_norm` either at the start or at the end
+		# (with a `_feedforward_layer_norm` either at the start or at the end)
+		# We only want to tweak the *first* FFN.
 
 		# Replace Dense w/ FFNSwiGLU2
 		self._feedforward_intermediate_dense = FFNSwiGLU2(
