@@ -45,9 +45,10 @@ import tensorflow as tf
 # Raise errors ASAP
 # torch.autograd.set_detect_anomaly(True)  # noqa: E402
 import typer
+from typing_extensions import Annotated
 
 from ary_seq2seq.config import ATLASET_DATASET, REPORTS_DIR
-from ary_seq2seq.modeling.colmo import TransformerBlock
+from ary_seq2seq.modeling.layers import TransformerDecoderSwiGLU
 
 type SentPair = tuple[str, str]
 type SentPairList = list[SentPair]
@@ -59,7 +60,7 @@ logger.opt = partial(logger.opt, colors=True)
 app = typer.Typer()
 
 # -------- experiment directory --------
-EXP_NAME = "darija_en_transformer_spm_kh_colmo"
+EXP_NAME = "darija_en_transformer_spm_kh"
 
 # parms/hparms
 BATCH_SIZE = 128
@@ -75,9 +76,6 @@ INTERMEDIATE_DIM = 2048
 NUM_HEADS = 8
 
 # Decoder-specific
-N_KV_HEADS = 4  # NUM_HEADS//2; KV heads in GQA, 1 per GPU
-NUM_BLOCKS = 1  # Number of transformer blocks; 12 in gpt2, 3 in gpt nano
-# The hidden dimension of the feed-forward network in the FF block = 4 * embedding with ReLU activation,
 # 8/3 * embedding with SwiGLU to keep n. of computations constant
 FEED_FORWARD_DIM = int(EMBED_DIM * 8 / 3)
 
@@ -258,49 +256,6 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 	)
 	# encoder = keras.Model(encoder_inputs, encoder_outputs)
 
-	# Fancy Decoder
-	decoder_inputs = keras.Input(shape=(None,), name="decoder_inputs")
-	encoded_seq_inputs = keras.Input(shape=(None, EMBED_DIM), name="decoder_state_inputs")
-
-	x = keras.layers.Embedding(input_dim=ARY_VOCAB_SIZE, output_dim=EMBED_DIM)(decoder_inputs)
-
-	for i in range(NUM_BLOCKS):
-		x = TransformerBlock(
-			NUM_HEADS,
-			N_KV_HEADS,
-			EMBED_DIM,
-			FEED_FORWARD_DIM,
-			dropout_rate=0.2,
-			name=f"transformer_block_{i}",
-		)(x)
-
-	x = keras.layers.LayerNormalization()(x)
-
-	decoder_outputs = keras.layers.Dense(
-		ARY_VOCAB_SIZE,
-		use_bias=False,
-		# activation="softmax" #we'll use the logits
-		dtype="float32",
-		name="output",
-	)(x)
-
-	decoder = keras.Model(
-		[
-			decoder_inputs,
-			encoded_seq_inputs,
-		],
-		decoder_outputs,
-	)
-	decoder_outputs = decoder([decoder_inputs, encoder_outputs])
-
-	transformer = keras.Model(
-		[encoder_inputs, decoder_inputs],
-		decoder_outputs,
-		name="transformer",
-	)
-
-	return transformer
-
 	# Decoder
 	decoder_inputs = keras.Input(shape=(None,), name="decoder_inputs")
 	encoded_seq_inputs = keras.Input(shape=(None, EMBED_DIM), name="decoder_state_inputs")
@@ -312,9 +267,15 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 	)(decoder_inputs)
 
 	# NOTE: We get cross-attention by passing encoded_seq_inputs as encoder_sequence here
-	x = keras_hub.layers.TransformerDecoder(intermediate_dim=INTERMEDIATE_DIM, num_heads=NUM_HEADS)(
-		decoder_sequence=x, encoder_sequence=encoded_seq_inputs
-	)
+	if EXP_NAME.endswith("_swiglu"):
+		logger.info("Using custom <blue>TransformerDecoderSwiGLU</blue> layer!")
+		x = TransformerDecoderSwiGLU(intermediate_dim=FEED_FORWARD_DIM, num_heads=NUM_HEADS)(
+			decoder_sequence=x, encoder_sequence=encoded_seq_inputs
+		)
+	else:
+		x = keras_hub.layers.TransformerDecoder(intermediate_dim=INTERMEDIATE_DIM, num_heads=NUM_HEADS)(
+			decoder_sequence=x, encoder_sequence=encoded_seq_inputs
+		)
 	x = keras.layers.Dropout(0.5)(x)
 	decoder_outputs = keras.layers.Dense(ARY_VOCAB_SIZE, activation="softmax")(x)
 	decoder = keras.Model(
@@ -375,23 +336,7 @@ def train_model(
 		verbose=1,
 	)
 
-	# Optimizer with decaying weights
-	optimizer = keras.optimizers.AdamW(
-		learning_rate=1e-5,
-		weight_decay=0.2,
-		beta_1=0.9,
-		beta_2=0.95,
-		epsilon=1e-5,
-	)
-
-	# transformer.compile(optimizer="rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
-
-	transformer.compile(
-		optimizer=optimizer,
-		loss=[keras.losses.SparseCategoricalCrossentropy(from_logits=True)],
-		# metrics=[keras_hub.metrics.Perplexity(from_logits=True, mask_token_id=0)],
-		metrics=["accuracy"],
-	)
+	transformer.compile(optimizer="rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
 
 	history = transformer.fit(
 		train_ds, epochs=EPOCHS, validation_data=val_ds, callbacks=[earlystop, tensorboard, checkpoint], verbose=1
@@ -402,8 +347,8 @@ def train_model(
 
 def plot_training(exp_dir: Path, history: keras.callbacks.History) -> None:
 	fig, ax = plt.subplots()
-	ax.plot(history.history["loss"], fmt="-", label="Train loss")
-	ax.plot(history.history["val_loss"], fmt="-", label="Val loss")
+	ax.plot(history.history["loss"], label="Train loss")
+	ax.plot(history.history["val_loss"], label="Val loss")
 	ax.set_title("Loss")
 	ax.set_xlabel("Epoch")
 	ax.set_ylabel("Loss value")
@@ -413,8 +358,8 @@ def plot_training(exp_dir: Path, history: keras.callbacks.History) -> None:
 	plt.clf()
 
 	fig, ax = plt.subplots()
-	ax.plot(history.history["accuracy"], fmt="-", label="Train accuracy")
-	ax.plot(history.history["val_accuracy"], fmt="-", label="Val accuracy")
+	ax.plot(history.history["accuracy"], label="Train accuracy")
+	ax.plot(history.history["val_accuracy"], label="Val accuracy")
 	ax.set_title("Accuracy")
 	ax.set_xlabel("Epoch")
 	ax.set_ylabel("Accuracy value")
@@ -529,7 +474,11 @@ def sample_inference(
 
 
 @app.command()
-def main():
+def main(with_swiglu: Annotated[bool, typer.Option(help="Use a Decoder w/ RMSNorm & a SwiGLU FFN")] = False):
+	global EXP_NAME
+	if with_swiglu:
+		EXP_NAME += "_swiglu"
+
 	ds = load_dataset()
 	pairs = clean_dataset(ds)
 	train_pairs, val_pairs, test_pairs = split_dataset(pairs)
