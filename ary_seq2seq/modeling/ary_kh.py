@@ -19,7 +19,6 @@ os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"  # noqa: E402
 random.seed(42)  # noqa: E402
 
 import ast
-from datetime import datetime
 from functools import partial
 import html
 import json
@@ -286,7 +285,7 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 
 
 def train_model(
-	exp_dir: Path, transformer: keras.Model, train_ds: TranslationDataset, val_ds: TranslationDataset
+	exp_dir: Path, timestamp: str, transformer: keras.Model, train_ds: TranslationDataset, val_ds: TranslationDataset
 ) -> tuple[keras.Model, keras.callbacks.History]:
 	logger.info("Training the model...")
 	transformer.summary()
@@ -317,7 +316,7 @@ def train_model(
 
 	# In case we ever need to interrupt training...
 	checkpoint = keras.callbacks.ModelCheckpoint(
-		filepath=(exp_dir / "checkpoints" / f"ary-{datetime.now().strftime('%Y%m%d-%H%M%S')}.keras").as_posix(),
+		filepath=(exp_dir / "checkpoints" / f"ary-{timestamp}.keras").as_posix(),
 		monitor="val_loss",
 		mode="min",
 		save_best_only=True,
@@ -335,15 +334,27 @@ def train_model(
 
 
 def plot_training(exp_dir: Path, history: keras.callbacks.History) -> None:
-	plt.plot(history.history["loss"])
-	plt.plot(history.history["val_loss"])
+	fig, ax = plt.subplots()
+	ax.plot(history.history["loss"], fmt="-", label="Train loss")
+	ax.plot(history.history["val_loss"], fmt="-", label="Val loss")
+	ax.set_title("Loss")
+	ax.set_xlabel("Epoch")
+	ax.set_ylabel("Loss value")
+	ax.legend()
 
 	plt.savefig((exp_dir / "losses.png").as_posix())
+	plt.clf()
 
-	plt.plot(history.history["accuracy"])
-	plt.plot(history.history["val_accuracy"])
+	fig, ax = plt.subplots()
+	ax.plot(history.history["accuracy"], fmt="-", label="Train accuracy")
+	ax.plot(history.history["val_accuracy"], fmt="-", label="Val accuracy")
+	ax.set_title("Accuracy")
+	ax.set_xlabel("Epoch")
+	ax.set_ylabel("Accuracy value")
+	ax.legend()
 
 	plt.savefig((exp_dir / "accuracy.png").as_posix())
+	plt.clf()
 
 
 # Inference
@@ -483,7 +494,7 @@ def main():
 	logger.info(f"Saving experiment run to <magenta>{exp_dir}</magenta>")
 
 	transformer = build_model(eng_vocab_size, ary_vocab_size)
-	transformer, history = train_model(exp_dir, transformer, train_ds, val_ds)
+	transformer, history = train_model(exp_dir, timestamp, transformer, train_ds, val_ds)
 
 	save_experiment(exp_dir, transformer, sp_en, sp_ary)
 	plot_training(exp_dir, history)
