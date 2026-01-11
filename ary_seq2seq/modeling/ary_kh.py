@@ -393,7 +393,6 @@ def train_model(
 		metrics=["accuracy"],
 	)
 
-
 	history = transformer.fit(
 		train_ds, epochs=EPOCHS, validation_data=val_ds, callbacks=[earlystop, tensorboard, checkpoint], verbose=1
 	)

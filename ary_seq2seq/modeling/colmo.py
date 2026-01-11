@@ -22,8 +22,7 @@
 import math
 
 import keras
-from keras.layers import Dense, LayerNormalization, Multiply
-from keras.ops import silu
+from keras.layers import Dense, Multiply, RMSNormalization
 from keras.src import constraints, initializers, ops, regularizers
 from keras.src.backend.config import is_flash_attention_enabled
 from keras.src.layers.activations.softmax import Softmax
@@ -44,34 +43,6 @@ FFNSwiGLU=(Swish(xW)*xV)W2
 
 # This replaces the first Dense layer of the FF block
 @keras.saving.register_keras_serializable()
-class FFNSwiGLU(Layer):
-	def __init__(self, intermediate_dim, **kwargs):
-		super(FFNSwiGLU, self).__init__(**kwargs)
-		self.intermediate_dim = intermediate_dim
-
-	def build(self, input_shape):
-		last_dim = input_shape[-1]
-		self.W = self.add_weight(
-			shape=(last_dim, self.intermediate_dim), initializer="glorot_uniform", trainable=True, name="W"
-		)
-		self.V = self.add_weight(
-			shape=(last_dim, self.intermediate_dim), initializer="glorot_uniform", trainable=True, name="V"
-		)
-		self.W2 = self.add_weight(shape=(self.intermediate_dim,), initializer="glorot_uniform", trainable=True, name="W2")
-		super(FFNSwiGLU, self).build(input_shape)
-
-	def call(self, inputs):
-		gate = silu(inputs @ self.W)
-		return (gate * (inputs @ self.V)) * self.W2
-
-	def get_config(self):
-		config = super(FFNSwiGLU, self).get_config()
-		config.update({"intermediate_dim": self.intermediate_dim})
-		return config
-
-
-# This replaces the first Dense layer of the FF block
-@keras.saving.register_keras_serializable()
 class FFNSwiGLU2(Layer):
 	def __init__(self, intermediate_dim, **kwargs):
 		super(FFNSwiGLU2, self).__init__(**kwargs)
@@ -79,15 +50,22 @@ class FFNSwiGLU2(Layer):
 
 	def build(self, input_shape):
 		# last_dim = input_shape[-1]
-		self.gate = Dense(self.intermediate_dim, activation="silu", use_bias=False, name="swiglu_gate")
-		self.linear = Dense(self.intermediate_dim, use_bias=False, name="swiglu_linear")
+		self.gate = Dense(
+			self.intermediate_dim,
+			activation="silu",
+			use_bias=False,
+			kernel_initializer="glorot_uniform",
+			name="swiglu_gate",
+		)
+		self.linear = Dense(
+			self.intermediate_dim, use_bias=False, kernel_initializer="glorot_uniform", name="swiglu_linear"
+		)
 		self.multiply = Multiply(name="swiglu_out")
 
 	def call(self, inputs):
 		gated = self.gate(inputs)
 		linear_out = self.linear(inputs)
-		# swiglu_out=self.multiply([gated, linear_out])
-		return gated * linear_out
+		return self.multiply([gated, linear_out])
 
 	def get_config(self):
 		config = super(FFNSwiGLU2, self).get_config()
@@ -593,7 +571,7 @@ class TransformerBlock(Layer):
 		)
 
 		self.dropout_1 = Dropout(self.dropout_rate, seed=SEED)
-		self.ln_1 = LayerNormalization()
+		self.ln_1 = RMSNormalization()
 		self.ffn_1 = FFNSwiGLU2(
 			self.ff_dim,
 			name="ffnswiglu",
@@ -604,10 +582,10 @@ class TransformerBlock(Layer):
 			name="ffnlinear",
 		)
 		self.dropout_2 = Dropout(self.dropout_rate, seed=SEED)
-		self.ln_2 = LayerNormalization()
+		self.ln_2 = RMSNormalization()
 
 	def call(self, inputs):
-		# input_shape = ops.shape(inputs)
+		# input_shape = keras.ops.shape(inputs)
 		# batch_size = input_shape[0]
 		# seq_len = input_shape[1]
 		inputs_n = self.ln_1(inputs)
@@ -641,7 +619,7 @@ class TransformerBlock(Layer):
 
 	def compute_output_shape(self, input_shape):
 		# Assumes input_shape is [batch_size, sequence_length, hidden_size]
-		# input_shape = ops.shape(inputs)
+		# input_shape = keras.ops.shape(inputs)
 		batch_size = input_shape[0]
 		sequence_length = input_shape[1]
 		hidden_size = input_shape[2]
