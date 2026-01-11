@@ -4,18 +4,22 @@ import os
 import random
 
 # NOTE: Switch to the torch backend,
-#       performance may be better on ROCm for some workflows...
+#       performance *may* be better on ROCm for some workflows...
+#       Here, in practice, it appears to be faster for epoch 1,
+#       but slower after that (and GPU/power utilization is not maximized),
+#       so we end up using the tf backend.
 # os.environ["KERAS_BACKEND"] = "torch"  # noqa: E402
 # NOTE: And when we're *not* using the torch backend,
 #       don't let tensorflow alloc a giant block of VRAM on startup,
 #       because it makes for a *really* bad time when the driver decides
 #       to relocate it to GTT to accomodate another smaller alloc...
-os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
-# NOTE: Same deal for XLA...
-# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"  # noqa: E402
+# NOTE: Same deal for XLA and its initial 75% of VRAM chunk...
+# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"  # noqa: E402
 random.seed(42)  # noqa: E402
 
 import ast
+from datetime import datetime
 from functools import partial
 import html
 import json
@@ -271,7 +275,6 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 	)
 	decoder_outputs = decoder([decoder_inputs, encoder_outputs])
 
-	# TODO: Add a tb cb
 	transformer = keras.Model(
 		[encoder_inputs, decoder_inputs],
 		decoder_outputs,
@@ -281,13 +284,53 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 	return transformer
 
 
-def train_model(transformer: keras.Model, train_ds: TranslationDataset, val_ds: TranslationDataset) -> keras.Model:
+def train_model(
+	exp_dir: Path, transformer: keras.Model, train_ds: TranslationDataset, val_ds: TranslationDataset
+) -> tuple[keras.Model, keras.callbacks.History]:
 	logger.info("Training the model...")
 	transformer.summary()
-	transformer.compile(optimizer="rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
-	transformer.fit(train_ds, epochs=EPOCHS, validation_data=val_ds)
 
-	return transformer
+	# Setup our callbacks
+	earlystop = keras.callbacks.EarlyStopping(
+		monitor="val_loss",
+		min_delta=0,
+		patience=5,
+		verbose=1,
+		mode="min",
+		baseline=None,
+		restore_best_weights=True,
+		start_from_epoch=8,  # We generally converge around epoch 15
+	)
+
+	tensorboard = keras.callbacks.TensorBoard(
+		log_dir=(exp_dir / "logs").as_posix(),
+		histogram_freq=1,
+		write_graph=True,
+		write_images=False,
+		write_steps_per_second=False,
+		update_freq="epoch",
+		profile_batch=0,
+		embeddings_freq=1,
+		embeddings_metadata=None,
+	)
+
+	# In case we ever need to interrupt training...
+	checkpoint = keras.callbacks.ModelCheckpoint(
+		filepath=(exp_dir / "checkpoints" / f"ary-{datetime.now().strftime('%Y%m%d-%H%M%S')}.keras").as_posix(),
+		monitor="val_loss",
+		mode="min",
+		save_best_only=True,
+		save_freq="epoch",
+		verbose=1,
+	)
+
+	transformer.compile(optimizer="rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+
+	history = transformer.fit(
+		train_ds, epochs=EPOCHS, validation_data=val_ds, callbacks=[earlystop, tensorboard, checkpoint], verbose=1
+	)
+
+	return transformer, history
 
 
 # Inference
@@ -339,14 +382,9 @@ def decode_sequences(
 
 
 def save_experiment(
-	transformer: keras.Model, sp_en: spm.SentencePieceProcessor, sp_ary: spm.SentencePieceProcessor, timestamp: str
+	exp_dir: Path, transformer: keras.Model, sp_en: spm.SentencePieceProcessor, sp_ary: spm.SentencePieceProcessor
 ) -> Path:
 	logger.info("Saving model...")
-
-	exp_dir = REPORTS_DIR / f"{EXP_NAME}_{timestamp}"
-	exp_dir.mkdir(parents=True, exist_ok=True)
-
-	logger.info(f"Saving experiment to <magenta>{exp_dir}</magenta>")
 
 	# Save model
 	model_path = exp_dir / "ary.keras"
@@ -375,11 +413,11 @@ def eval_on_test(transformer: keras.Model, test_ds: TranslationDataset) -> tuple
 
 # Qualitative inference examples
 def sample_inference(
+	exp_dir: Path,
 	transformer: keras.Model,
 	sp_en: spm.SentencePieceProcessor,
 	sp_ary: spm.SentencePieceProcessor,
 	test_pairs: SentPairList,
-	exp_dir: Path,
 ) -> None:
 	NUM_EXAMPLES = 20
 	examples = []
@@ -426,11 +464,15 @@ def main():
 	logger.info("test:")
 	print(test_ds[0])
 
-	transformer = build_model(eng_vocab_size, ary_vocab_size)
-	transformer = train_model(transformer, train_ds, val_ds)
-
 	timestamp = time.strftime("%Y%m%d_%H%M%S")
-	exp_dir = save_experiment(transformer, sp_en, sp_ary, timestamp)
+	exp_dir = REPORTS_DIR / f"{EXP_NAME}_{timestamp}"
+	exp_dir.mkdir(parents=True, exist_ok=True)
+	logger.info(f"Saving experiment run to <magenta>{exp_dir}</magenta>")
+
+	transformer = build_model(eng_vocab_size, ary_vocab_size)
+	transformer, history = train_model(exp_dir, transformer, train_ds, val_ds)
+
+	save_experiment(exp_dir, transformer, sp_en, sp_ary)
 
 	test_loss, test_acc = eval_on_test(transformer, test_ds)
 
@@ -442,7 +484,7 @@ def main():
 		print("ARY:", decode_sequences(transformer, sp_en, sp_ary, [s])[0])
 		print()
 
-	sample_inference(transformer, sp_en, sp_ary, test_pairs, exp_dir)
+	sample_inference(exp_dir, transformer, sp_en, sp_ary, test_pairs)
 
 	# Save training metadata
 	experiment_metadata = {
