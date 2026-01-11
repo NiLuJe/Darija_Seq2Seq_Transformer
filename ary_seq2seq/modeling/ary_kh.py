@@ -235,7 +235,6 @@ def build_model(ENG_VOCAB_SIZE: int, ARY_VOCAB_SIZE: int) -> keras.Model:
 	# Encoder
 	encoder_inputs = keras.Input(shape=(None,), name="encoder_inputs")
 
-	# TODO: Switch to RoPE & SwiGLU
 	x = keras_hub.layers.TokenAndPositionEmbedding(
 		vocabulary_size=ENG_VOCAB_SIZE,
 		sequence_length=SEQUENCE_LENGTH,
