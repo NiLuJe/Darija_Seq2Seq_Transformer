@@ -1,6 +1,9 @@
 # Data
 /data/
 
+# Model runs
+/reports/darija_en_*/
+
 # Mac OS-specific storage files
 .DS_Store
 
