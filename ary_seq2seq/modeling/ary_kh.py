@@ -497,7 +497,7 @@ def main(with_swiglu: Annotated[bool, typer.Option(help="Use a Decoder w/ RMSNor
 	val_ds = TranslationDataset(sp_en, sp_ary, val_pairs)
 	test_ds = TranslationDataset(sp_en, sp_ary, test_pairs)
 
-	logger.info("Sanity-check the data splits:")
+	logger.info("Sanity-check of the data splits:")
 	logger.info("train:")
 	print(train_ds[0])
 	logger.info("val:")
