@@ -541,6 +541,7 @@ def main(with_swiglu: Annotated[bool, typer.Option(help="Use a Decoder w/ RMSNor
 		"batch_size": BATCH_SIZE,
 		"embedding_dim": EMBED_DIM,
 		"latent_dim": INTERMEDIATE_DIM,
+		"swiglu_dim": FEED_FORWARD_DIM,
 		"num_heads": NUM_HEADS,
 		"optimizer": "RMSprop",
 		"epochs": 10,
