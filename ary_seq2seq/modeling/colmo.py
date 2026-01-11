@@ -1,6 +1,8 @@
 # Fancy LLama-esque Decoder Transformer blocks from
 # https://github.com/gmarchetti2020/llm-foundations
 # https://github.com/gmarchetti2020/colmo
+#
+# Specifically, https://github.com/gmarchetti2020/colmo/blob/main/colmo2-tpu-pretrain-64.py @ 9da209b
 ##
 #
 # Copyright 2025 Google
