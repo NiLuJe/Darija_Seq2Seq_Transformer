@@ -38,6 +38,7 @@ keras.config.enable_flash_attention()  # noqa: E402
 from keras import ops
 import keras_hub
 from loguru import logger
+from matplotlib import pyplot as plt
 import sentencepiece as spm
 import tensorflow as tf
 
@@ -333,6 +334,18 @@ def train_model(
 	return transformer, history
 
 
+def plot_training(exp_dir: Path, history: keras.callbacks.History) -> None:
+	plt.plot(history.history["loss"])
+	plt.plot(history.history["val_loss"])
+
+	plt.savefig((exp_dir / "losses.png").as_posix())
+
+	plt.plot(history.history["accuracy"])
+	plt.plot(history.history["val_accuracy"])
+
+	plt.savefig((exp_dir / "accuracy.png").as_posix())
+
+
 # Inference
 def decode_sequences(
 	transformer: keras.Model,
@@ -473,6 +486,7 @@ def main():
 	transformer, history = train_model(exp_dir, transformer, train_ds, val_ds)
 
 	save_experiment(exp_dir, transformer, sp_en, sp_ary)
+	plot_training(exp_dir, history)
 
 	test_loss, test_acc = eval_on_test(transformer, test_ds)
 

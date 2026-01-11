@@ -3,6 +3,7 @@ datasets
 keras
 keras_hub
 loguru
+matplotlib
 pip
 python-dotenv
 rich
