@@ -62,7 +62,7 @@ source .venv/bin/activate
 make requirements
 ```
 
-NOTE: Downloading the dataset requires to be logged in to HF, and to have accepted the T&C for the `atlasia/Atlaset`.
+NOTE: Downloading the dataset requires to be logged in to HF, and to have accepted the T&C for the `atlasia/Atlaset` dataset.
 
 ```bash
 python ary_seq2seq/dataset.py
