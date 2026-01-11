@@ -44,15 +44,15 @@ format:
 ## Download Data from storage system
 .PHONY: sync_data_down
 sync_data_down:
-	aws s3 sync s3://tal-m2-trad/data/ \
-		data/
+	aws s3 sync s3://tal-m2-trad/reports/ \
+		reports/
 
 
 ## Upload Data to storage system
 .PHONY: sync_data_up
 sync_data_up:
-	aws s3 sync data/ \
-		s3://tal-m2-trad/data
+	aws s3 sync reports/ \
+		s3://tal-m2-trad/reports
 
 
 
