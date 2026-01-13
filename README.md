@@ -41,9 +41,18 @@ EN-ARY NMT school project
     │
     ├── modeling                
     │   ├── __init__.py 
-    │   ├── ary_kh.py           <- Keras-Hub implementation of the model
-    │   ├── prompt.py           <- A small CLI app to play with the pretrained model
-    │   └── {colmo,layers}.py   <- Support code for custom layers
+    |   |
+    │   ├── ary_kh.py                     <- Keras-Hub implementation of the model
+    |   |
+    |   ├── transformer_torch_ary_spm.py  <- Raw Keras implementation of the model
+    |   |
+    │   ├── prompt.py                     <- A small CLI app to play with the pretrained model
+    |   |
+    │   └── {colmo,layers}.py             <- Support code for custom Keras-Hub layers
+    │
+    ├── eval.py                 <- Script used to generate evaluation data
+    |
+    ├── bleu.py                 <- Script used to compute evaluation scores
     │
     └── dataset.py              <- Scripts to download or generate data
 ```
