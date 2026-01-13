@@ -41,7 +41,8 @@ EN-ARY NMT school project
     │
     ├── modeling                
     │   ├── __init__.py 
-    │   ├── ary_kh.py           <- Keras-Hub implementation of the model          
+    │   ├── ary_kh.py           <- Keras-Hub implementation of the model
+    │   ├── prompt.py           <- A small CLI app to play with the pretrained model
     │   └── {colmo,layers}.py   <- Support code for custom layers
     │
     └── dataset.py              <- Scripts to download or generate data
