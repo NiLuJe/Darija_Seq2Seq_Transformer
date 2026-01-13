@@ -258,7 +258,7 @@ class TrainContext:
 
 		self.transformer.compile(optimizer="rmsprop", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
 
-		self.history = self.transformer.fit(
+		self.train_hist = self.transformer.fit(
 			self.train_ds,
 			epochs=EPOCHS,
 			validation_data=self.val_ds,
@@ -282,12 +282,12 @@ class TrainContext:
 
 		# Dump the history, too
 		with (self.exp_dir / "history.json").open("w", encoding="utf-8") as f:
-			json.dump(self.history, f, ensure_ascii=False, indent=2)
+			json.dump(self.train_hist.history, f, ensure_ascii=False, indent=2)
 
 	def plot_training(self) -> None:
 		fig, ax = plt.subplots()
-		ax.plot(self.history.history["loss"], label="Train loss")
-		ax.plot(self.history.history["val_loss"], label="Val loss")
+		ax.plot(self.train_hist.history["loss"], label="Train loss")
+		ax.plot(self.train_hist.history["val_loss"], label="Val loss")
 		ax.set_title("Loss")
 		ax.set_xlabel("Epoch")
 		ax.set_ylabel("Loss value")
@@ -297,8 +297,8 @@ class TrainContext:
 		plt.clf()
 
 		fig, ax = plt.subplots()
-		ax.plot(self.history.history["accuracy"], label="Train accuracy")
-		ax.plot(self.history.history["val_accuracy"], label="Val accuracy")
+		ax.plot(self.train_hist.history["accuracy"], label="Train accuracy")
+		ax.plot(self.train_hist.history["val_accuracy"], label="Val accuracy")
 		ax.set_title("Accuracy")
 		ax.set_xlabel("Epoch")
 		ax.set_ylabel("Accuracy value")
