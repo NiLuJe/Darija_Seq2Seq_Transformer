@@ -9,6 +9,7 @@ python-dotenv
 rich
 ruff
 sentencepiece
+textual
 tqdm
 typer
 -e .

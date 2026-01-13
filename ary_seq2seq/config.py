@@ -29,6 +29,7 @@ EXTERNAL_DATA_DIR = DATA_DIR / "external"
 ATLASET_DATASET = EXTERNAL_DATA_DIR / "atlasia_Atlaset"
 
 MODELS_DIR = PROJ_ROOT / "models"
+PRETRAINED_MODEL = MODELS_DIR / "pretrained"
 
 REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
