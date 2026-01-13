@@ -42,7 +42,7 @@ def main(
 		Path, typer.Option("--model-dir", "-d", help="Path to the folder containing the serialized model to evaluate")
 	],
 ):
-	logger.info("Loading model @ <magenta>model_path</magenta>")
+	logger.info(f"Loading model @ <magenta>{model_path}</magenta>")
 
 	ctx = InferenceContext(model_path)
 
