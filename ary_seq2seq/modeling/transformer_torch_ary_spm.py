@@ -157,7 +157,7 @@ print("ARY vocab:", ary_vocab_size)
 # 8. Vectorization utilities
 # ============================================================
 SEQUENCE_LENGTH = 50
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 
 def pad_or_truncate(seq, max_len):
     seq = seq[:max_len]
@@ -339,7 +339,7 @@ transformer.summary()
 # ============================================================
 # 12. Train
 # ============================================================
-transformer.fit(train_ds, epochs=10, validation_data=val_ds)
+transformer.fit(train_ds, epochs=16, validation_data=val_ds)
 
 # ============================================================
 # 13. Inference
