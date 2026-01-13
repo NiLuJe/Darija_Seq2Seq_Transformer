@@ -64,6 +64,8 @@ class FFNSwiGLU2(Layer):
 		)
 		self.multiply = Multiply(name="swiglu_out")
 
+		super(FFNSwiGLU2, self).build(input_shape)
+
 	def call(self, inputs):
 		gated = self.gate(inputs)
 		linear_out = self.linear(inputs)
