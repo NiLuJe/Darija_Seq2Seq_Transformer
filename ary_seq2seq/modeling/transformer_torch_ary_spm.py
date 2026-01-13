@@ -179,7 +179,7 @@ def encode_ary(text):
 # 9. Torch-compatible Dataset
 # ============================================================
 class TranslationDataset(keras.utils.PyDataset):
-    def __init__(self, pairs):
+    def __init__(self, pairs, **kwargs):
         super().__init__(**kwargs)
 
         self.eng, self.ary = zip(*pairs)
