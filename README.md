@@ -72,3 +72,16 @@ Training the Hub variant can be started via
 ```bash
 python ary_seq2seq/modeling/ary_kh.py [--with-swiglu]
 ```
+
+## Inference
+
+A pretrained model can be download via
+
+```bash
+make download model
+```
+
+You can then play with it in a CLI app:
+```bash
+python ary_seq2seq/modeling/prompt.py
+```
