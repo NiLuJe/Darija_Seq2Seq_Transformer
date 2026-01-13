@@ -2,6 +2,7 @@
 
 from functools import partial
 from pathlib import Path
+import random
 from typing import Annotated
 
 from keras.saving import load_model
@@ -9,6 +10,8 @@ from loguru import logger
 import typer
 
 from ary_seq2seq.modeling.ary_kh import TrainContext
+
+random.seed(42)
 
 
 # Simply subclass our TrainContext to keep it DRY
