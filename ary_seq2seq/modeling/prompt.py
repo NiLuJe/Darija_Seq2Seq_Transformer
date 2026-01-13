@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import re
+
 from keras.saving import load_model
 from textual import on
 from textual.app import App, ComposeResult
@@ -7,7 +9,7 @@ from textual.binding import Binding
 from textual.widgets import Footer, Header, Input, Label, Pretty
 
 from ary_seq2seq.config import PRETRAINED_MODEL
-from ary_seq2seq.modeling.ary_kh import TrainContext
+from ary_seq2seq.modeling.ary_kh import END_TOKEN, START_TOKEN, TrainContext
 
 
 # Simply subclass our TrainContext to keep it DRY
@@ -17,14 +19,22 @@ class InferenceContext(TrainContext):
 		self.exp_dir = PRETRAINED_MODEL
 		model_file = self.exp_dir / "ary.keras"
 
+		self.target_pattern = re.compile(rf"{re.escape(START_TOKEN)}(.*?){re.escape(END_TOKEN)}")
+
 		self.load_trained_tokenizers()
 
-		self.transformer = load_model(model_file.as_posix(), custom_objects=None, compile=True, safe_mode=True)
+		self.transformer = load_model(model_file.as_posix(), compile=True, safe_mode=True)
 		# No inheritance, we very much don't care about what happens in TrainContext's ctor!
 
 	def translate(self, sentence: str) -> str:
 		# Thankfully, we already have basically all the scaffolding in place, so this is pretty simple
-		return self.decode_sequences([sentence])[0]
+		prediction = self.decode_sequences([sentence])[0]
+
+		m = self.target_pattern.fullmatch(prediction)
+		if m:
+			return m.group(1).strip()
+		else:
+			return prediction
 
 
 # Very simple implementation based on the example InputApp...
