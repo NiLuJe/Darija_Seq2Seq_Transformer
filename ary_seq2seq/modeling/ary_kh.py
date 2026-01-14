@@ -45,6 +45,7 @@ from loguru import logger
 from matplotlib import pyplot as plt
 import sentencepiece as spm
 import tensorflow as tf
+from tqdm.rich import tqdm
 
 # import torch
 # Raise errors ASAP
@@ -369,7 +370,7 @@ class TrainContext:
 		logger.info("Inferencing...")
 		examples = []
 
-		for eng, ref in random.sample(test_pairs, num_examples):
+		for eng, ref in tqdm(random.sample(test_pairs, num_examples)):
 			pred = self.decode_sequences([eng])[0]
 			examples.append(
 				{
@@ -489,7 +490,7 @@ def main(with_swiglu: Annotated[bool, typer.Option(help="Use a Decoder w/ RMSNor
 	ctx = TrainContext(with_swiglu)
 
 	ctx.load_dataset()
-	ctx.clean_dataset()
+	ctx.clean_dataset()  # NOTE: This should really have only been done once on the full dataset & then saved...
 	ctx.split_dataset()
 
 	ctx.train_tokenizers()
