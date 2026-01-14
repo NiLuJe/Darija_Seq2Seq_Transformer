@@ -2,11 +2,12 @@
 
 import keras
 from keras_hub.layers import TransformerDecoder
+from keras_hub.src.api_export import keras_hub_export
 
 from ary_seq2seq.modeling.colmo import FFNSwiGLU2
 
 
-@keras.saving.register_keras_serializable()
+@keras_hub_export("keras_hub.layers.TransformerDecoderSwiGLU")
 class TransformerDecoderSwiGLU(TransformerDecoder):
 	# Overload the minimal amount of stuff possible:
 	# we just want to overwrite the first FFN to avoid code duplication...
