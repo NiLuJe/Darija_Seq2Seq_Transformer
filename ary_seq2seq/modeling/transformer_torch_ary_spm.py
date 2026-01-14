@@ -66,6 +66,7 @@ ds = load_from_disk(ATLASET_DATASET)
 pairs = []
 MAX_ROWS = 500_000
 MAX_WORDS = 50
+EPOCHS = 16
 
 for ex in ds["train"].select(range(MAX_ROWS)):
     try:
@@ -218,6 +219,7 @@ print(test_ds[0])
 class TransformerEncoder(layers.Layer):
     def __init__(self, embed_dim, dense_dim, num_heads, **kwargs):
         super().__init__(**kwargs)
+
         self.attention = layers.MultiHeadAttention(num_heads=num_heads, key_dim=embed_dim)
         self.dense_proj = keras.Sequential(
             [
@@ -241,8 +243,9 @@ class TransformerEncoder(layers.Layer):
 
 @keras.saving.register_keras_serializable()
 class PositionalEmbedding(layers.Layer):
-    def __init__(self, sequence_length, vocab_size, embed_dim):
-        super().__init__()
+    def __init__(self, sequence_length, vocab_size, embed_dim, **kwargs):
+        super().__init__(**kwargs)
+
         self.token_emb = layers.Embedding(vocab_size, embed_dim, mask_zero=True)
         self.pos_emb = layers.Embedding(sequence_length, embed_dim)
 
@@ -257,8 +260,9 @@ class PositionalEmbedding(layers.Layer):
 
 @keras.saving.register_keras_serializable()
 class TransformerDecoder(layers.Layer):
-    def __init__(self, embed_dim, latent_dim, num_heads):
-        super().__init__()
+    def __init__(self, embed_dim, latent_dim, num_heads, **kwargs):
+        super().__init__(**kwargs)
+
         self.supports_masking = True
         self.attn_1 = layers.MultiHeadAttention(num_heads, embed_dim)
         self.attn_2 = layers.MultiHeadAttention(num_heads, embed_dim)
@@ -324,7 +328,7 @@ x = TransformerDecoder(EMBED_DIM, LATENT_DIM, NUM_HEADS)([x, encoder_outputs])
 outputs = layers.Dense(ary_vocab_size)(x)
 
 transformer = keras.Model(
-    {"encoder_inputs": encoder_inputs, "decoder_inputs": decoder_inputs},
+    [encoder_inputs, decoder_inputs],
     outputs,
 )
 
@@ -339,7 +343,7 @@ transformer.summary()
 # ============================================================
 # 12. Train
 # ============================================================
-transformer.fit(train_ds, epochs=16, validation_data=val_ds)
+transformer.fit(train_ds, epochs=EPOCHS, validation_data=val_ds)
 
 # ============================================================
 # 13. Inference
@@ -352,10 +356,7 @@ def decode_sequence(sentence):
         dec = pad_or_truncate(decoded, SEQUENCE_LENGTH)
         dec = np.array([dec], dtype="int32")
 
-        preds = transformer(
-            {"encoder_inputs": enc, "decoder_inputs": dec},
-            training=False,
-        )
+        preds = transformer([enc, dec], training=False)
 
         next_id = int(ops.argmax(preds[0, len(decoded) - 1]))
         decoded.append(next_id)
