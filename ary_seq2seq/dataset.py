@@ -78,7 +78,7 @@ def clean_dataset(dataset: DatasetDict) -> SentPairDicts:
 	return pairs
 
 
-def load_clean_dataset(fraction: float = 1.0) -> SentPairList:
+def load_clean_dataset(fraction: float) -> SentPairList:
 	df = pl.read_parquet(CLEAN_DATASET)
 
 	# NOTE: Previous behavior led to 321668 rows,

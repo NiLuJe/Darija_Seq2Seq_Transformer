@@ -240,6 +240,8 @@ for _ in range(5):
 # ============================================================
 # 15. Save experiment artifacts
 # ============================================================
+import json
+from pathlib import Path
 
 # -------- experiment directory --------
 EXP_NAME = "darija_en_transformer_spm"
