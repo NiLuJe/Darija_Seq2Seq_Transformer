@@ -4,6 +4,8 @@ import ast
 from functools import partial
 import html
 import re
+import sys
+from typing import TypeAlias
 import unicodedata
 
 from datasets import DatasetDict, load_dataset
@@ -20,10 +22,14 @@ logger.opt = partial(logger.opt, colors=True)
 
 app = typer.Typer()
 
-
-type SentPair = tuple[str, str]
-type SentPairList = list[SentPair]
-type SentPairDicts = list[dict[str, str]]
+if sys.version_info < (3, 12):
+	SentPair: TypeAlias = tuple[str, str]
+	SentPairList: TypeAlias = list[SentPair]
+	SentPairDicts: TypeAlias = list[dict[str, str]]
+else:
+	type SentPair = tuple[str, str]
+	type SentPairList = list[SentPair]
+	type SentPairDicts = list[dict[str, str]]
 
 # Cleaning utilities
 HTML_TAG_RE = re.compile(r"<[^>]+>")

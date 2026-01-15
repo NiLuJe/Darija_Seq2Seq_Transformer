@@ -27,8 +27,9 @@ import contextlib
 from functools import partial
 import json
 import math
+import sys
 import time
-from typing import Iterator
+from typing import Iterator, TypeAlias
 
 import keras
 
@@ -53,8 +54,12 @@ from ary_seq2seq.config import CLEAN_DATASET, MODELS_DIR
 from ary_seq2seq.modeling.layers import TransformerDecoderSwiGLU
 
 # NOTE: Duplicated from ary_seq2seq.dataset because rocBLAS implodes if we import ast... o_O
-type SentPair = tuple[str, str]
-type SentPairList = list[SentPair]
+if sys.version_info < (3, 12):
+	SentPair: TypeAlias = tuple[str, str]
+	SentPairList: TypeAlias = list[SentPair]
+else:
+	type SentPair = tuple[str, str]
+	type SentPairList = list[SentPair]
 
 # Always enable color in loguru
 logger = logger.opt(colors=True)
