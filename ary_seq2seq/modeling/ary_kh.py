@@ -38,6 +38,7 @@ from keras import ops
 import keras_hub
 from loguru import logger
 from matplotlib import pyplot as plt
+import polars as pl
 import sentencepiece as spm
 import tensorflow as tf
 from tqdm.rich import tqdm
@@ -48,9 +49,12 @@ from tqdm.rich import tqdm
 import typer
 from typing_extensions import Annotated
 
-from ary_seq2seq.config import MODELS_DIR
-from ary_seq2seq.dataset import SentPairList, load_clean_dataset
+from ary_seq2seq.config import CLEAN_DATASET, MODELS_DIR
 from ary_seq2seq.modeling.layers import TransformerDecoderSwiGLU
+
+# NOTE: Duplicated from ary_seq2seq.dataset because rocBLAS implodes if we import ast... o_O
+type SentPair = tuple[str, str]
+type SentPairList = list[SentPair]
 
 # Always enable color in loguru
 logger = logger.opt(colors=True)
@@ -122,7 +126,8 @@ class TrainContext:
 
 	def load_clean_dataset(self) -> None:
 		logger.info("Loading clean dataset from disk...")
-		self.pairs = load_clean_dataset(DATASET_FRACTION)
+		df = pl.read_parquet(CLEAN_DATASET)
+		self.pairs = [tuple(d.values()) for d in df.sample(fraction=DATASET_FRACTION).to_dicts()]
 
 	def split_dataset(self) -> None:
 		logger.info("Splitting dataset...")
