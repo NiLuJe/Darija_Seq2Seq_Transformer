@@ -65,6 +65,8 @@ app = typer.Typer()
 # parms/hparms
 DATASET_FRACTION = 1.0
 
+NORMALIZE_TOKENS = False
+
 BATCH_SIZE = 128
 EPOCHS = 20
 SEQUENCE_LENGTH = 50
@@ -84,7 +86,10 @@ FEED_FORWARD_DIM = int(EMBED_DIM * 8 / 3)
 
 # Text standardization
 def standardize(text: str) -> str:
-	return text.lower().strip()
+	if NORMALIZE_TOKENS:
+		return text.lower().strip()
+	else:
+		return text
 
 
 def standardize_tuple(sentences: tuple[str]) -> tuple[str]:

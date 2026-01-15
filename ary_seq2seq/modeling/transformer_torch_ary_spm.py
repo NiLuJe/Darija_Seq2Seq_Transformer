@@ -32,8 +32,13 @@ from ary_seq2seq.dataset import load_clean_dataset
 # ============================================================
 # 3. Cleaning utilities
 # ============================================================
+NORMALIZE_TOKENS = False
+
 def standardize(text):
-    return text.lower().strip()
+    if NORMALIZE_TOKENS:
+        return text.lower().strip()
+    else:
+        return text
 
 # ============================================================
 # 4. Load Atlaset dataset
