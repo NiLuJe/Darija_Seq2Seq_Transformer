@@ -4,30 +4,26 @@
 # 1. Backend setup
 # ============================================================
 import os
+
 os.environ["KERAS_BACKEND"] = "torch"
 
 import torch
+
 torch.autograd.set_detect_anomaly(True)
 
 # ============================================================
 # 2. Imports
 # ============================================================
-import math
-import random
-import re
-import ast
-import html
-import unicodedata
-import tempfile
 import json
-import time
+import math
 from pathlib import Path
+import random
+import tempfile
+import time
 
-import numpy as np
 import keras
 from keras import layers, ops
-
-from datasets import load_from_disk
+import numpy as np
 import sentencepiece as spm
 
 from ary_seq2seq.dataset import load_clean_dataset
@@ -168,7 +164,7 @@ print(test_ds[0])
 # ============================================================
 # 8. Transformer layers
 # ============================================================
-from ary_seq2seq.modeling.torch_layers import TransformerEncoder, PositionalEmbedding, TransformerDecoder
+from ary_seq2seq.modeling.torch_layers import PositionalEmbedding, TransformerDecoder, TransformerEncoder
 
 # ============================================================
 # 11. Build model
@@ -202,6 +198,7 @@ transformer.summary()
 # ============================================================
 # 12. Train
 # ============================================================
+EPOCHS=20
 transformer.fit(train_ds, epochs=EPOCHS, validation_data=val_ds)
 
 # ============================================================
@@ -243,9 +240,6 @@ for _ in range(5):
 # ============================================================
 # 15. Save experiment artifacts
 # ============================================================
-import json
-import time
-from pathlib import Path
 
 # -------- experiment directory --------
 EXP_NAME = "darija_en_transformer_spm"
