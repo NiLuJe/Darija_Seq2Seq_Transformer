@@ -95,7 +95,7 @@ def main():
 	logger.info("Dumping raw dataset to disk...")
 	ds.save_to_disk(ATLASET_DATASET.as_posix())
 
-	# The clean the whole thing once and for all...
+	# Then clean the whole thing once and for all...
 	pairs = clean_dataset(ds)
 
 	logger.info("Dumping clean dataset to disk...")
