@@ -14,6 +14,11 @@ MODEL_FILES := ary-pretrained.tar.gz
 MODELS := $(patsubst %,models/%,$(MODEL_FILES))
 MODELS_CACHE := models/pretrained
 
+PROCESSED_DATASET_FILES := atlaset.parquet
+PROCESSED_DATASETS := $(patsubst %,data/processed/%,$(PROCESSED_DATASET_FILES))
+
+DATASETS := $(PROCESSED_DATASETS)
+
 #################################################################################
 # COMMANDS                                                                      #
 #################################################################################
@@ -63,6 +68,9 @@ sync_data_up:
 	for model in $(MODELS) ; do \
 		aws s3api put-object-acl --bucket tal-m2-trad --acl public-read --key $${model} ; \
 	done
+	for dataset in $(DATASETS) ; do \
+		aws s3api put-object-acl --bucket tal-m2-trad --acl public-read --key $${dataset} ; \
+	done
 
 ## Download experiment data w/o S3
 $(MODELS):
@@ -74,8 +82,12 @@ $(MODELS_CACHE):
 		[[ "$${model}" == *.tar.gz ]] && tar xvf "$${model}" -C models/ ; \
 	done
 
+$(DATASETS):
+	mkdir -p data/{external,raw,interim,processed}
+	wget "https://tal-m2-trad.s3.gra.io.cloud.ovh.net/$@" -O "$@"
+
 .PHONY: download_data
-download_data: $(MODELS) $(MODELS_CACHE)
+download_data: $(MODELS) $(MODELS_CACHE) # $(DATASETS)
 
 
 
